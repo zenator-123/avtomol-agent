@@ -1,0 +1,11 @@
+{
+  "name": "avtomol-ai-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embeddable AI auto-parts consultant for AvtoMol.com",
+  "scripts": {
+    "import:catalog": "node scripts/import-avtomol-catalog.js",
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}
