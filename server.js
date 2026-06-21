@@ -23,6 +23,8 @@ const dataDir = path.join(projectRoot, "data");
 const workDir = path.join(projectRoot, "work");
 const leadsFile = path.join(workDir, "leads.jsonl");
 const sessions = new Map();
+let profileCache = null;
+let productsCache = null;
 
 const MIME_TYPES = {
   ".css": "text/css; charset=utf-8",
@@ -138,6 +140,22 @@ async function saveLead({ contact, message, pageContext, sessionId }) {
   );
 }
 
+async function getProfile() {
+  if (!profileCache) {
+    profileCache = await readJson(path.join(dataDir, "store-profile.json"));
+  }
+
+  return profileCache;
+}
+
+async function getProducts() {
+  if (!productsCache) {
+    productsCache = await readJson(path.join(dataDir, "products.json"));
+  }
+
+  return productsCache;
+}
+
 async function serveStaticFile(response, pathname, origin) {
   const relativePath = pathname === "/" ? "/index.html" : pathname;
   const resolvedPath = path.normalize(path.join(publicDir, relativePath));
@@ -184,10 +202,7 @@ async function handleChat(request, response, origin) {
     pageTitle: String(payload.pageTitle || "").slice(0, 200),
   };
 
-  const [profile, products] = await Promise.all([
-    readJson(path.join(dataDir, "store-profile.json")),
-    readJson(path.join(dataDir, "products.json")),
-  ]);
+  const [profile, products] = await Promise.all([getProfile(), getProducts()]);
 
   const faqHit = findFaqAnswer(profile, message);
   const outfitSuggestions = faqHit ? [] : buildOutfitSuggestions(products, message, 4);
@@ -249,6 +264,8 @@ async function handleChat(request, response, origin) {
 
 async function bootstrap() {
   await ensureDir(workDir);
+  const [, products] = await Promise.all([getProfile(), getProducts()]);
+  searchProducts(products, "205/55R16", 1);
 
   const server = http.createServer(async (request, response) => {
     const origin = request.headers.origin || "";
