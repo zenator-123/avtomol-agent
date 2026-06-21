@@ -13,6 +13,7 @@ loadEnvFile(path.join(projectRoot, ".env"));
 const PORT = Number(process.env.PORT || 3000);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-5.5";
+const SHOP_BASE_URL = process.env.SHOP_BASE_URL || "https://avtomol.com";
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*")
   .split(",")
   .map((item) => item.trim())
@@ -96,6 +97,21 @@ function buildFocusAction(suggestion, language) {
     return null;
   }
 
+  const url =
+    suggestion.source === "avtomol-tyres"
+      ? `${SHOP_BASE_URL}/search?q=${encodeURIComponent(
+          [
+            suggestion.vendor,
+            ...(suggestion.tireSizes || []),
+            suggestion.season === "winter" ? "зимни гуми" : "",
+            suggestion.season === "summer" ? "летни гуми" : "",
+            suggestion.season === "all-season" ? "всесезонни гуми" : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || "гуми"
+        )}`
+      : suggestion.url;
+
   const labels = {
     bg: `Отвори ${suggestion.name}`,
     en: `Open ${suggestion.name}`,
@@ -103,8 +119,33 @@ function buildFocusAction(suggestion, language) {
   };
 
   return {
-    url: suggestion.url,
+    url,
     label: labels[language] || labels.bg,
+  };
+}
+
+function displayUrlForSuggestion(suggestion) {
+  if (suggestion?.source === "avtomol-tyres") {
+    const query = [
+      suggestion.vendor,
+      ...(suggestion.tireSizes || []),
+      suggestion.season === "winter" ? "зимни гуми" : "",
+      suggestion.season === "summer" ? "летни гуми" : "",
+      suggestion.season === "all-season" ? "всесезонни гуми" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return `${SHOP_BASE_URL}/search?q=${encodeURIComponent(query || "гуми")}`;
+  }
+
+  return suggestion?.url || SHOP_BASE_URL;
+}
+
+function toPublicSuggestion(suggestion) {
+  return {
+    ...suggestion,
+    url: displayUrlForSuggestion(suggestion),
   };
 }
 
@@ -207,8 +248,9 @@ async function handleChat(request, response, origin) {
   const faqHit = findFaqAnswer(profile, message);
   const outfitSuggestions = faqHit ? [] : buildOutfitSuggestions(products, message, 4);
   const suggestions = faqHit ? [] : outfitSuggestions.length ? outfitSuggestions : searchProducts(products, message, 4);
+  const publicSuggestions = suggestions.map(toPublicSuggestion);
   const language = detectLanguage(message);
-  const focusSuggestion = outfitSuggestions.length > 1 ? null : pickFocusSuggestion(message, suggestions);
+  const focusSuggestion = outfitSuggestions.length > 1 ? null : pickFocusSuggestion(message, publicSuggestions);
   const session = getSession(sessionId);
   const capturedLead = extractLead(message);
 
@@ -256,7 +298,7 @@ async function handleChat(request, response, origin) {
       mode,
       reply,
       sessionId,
-      suggestions,
+      suggestions: publicSuggestions,
     },
     origin
   );
