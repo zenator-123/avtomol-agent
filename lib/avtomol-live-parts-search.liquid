@@ -1,0 +1,191 @@
+<section class="avtomol-live-parts" data-avtomol-live-parts>
+  <form class="avtomol-live-parts__form">
+    <div>
+      <label>OEM / артикул / част</label>
+      <input name="q" placeholder="OC90, 12915-86F50, накладки">
+    </div>
+    <div>
+      <label>Марка</label>
+      <input name="make" placeholder="VW">
+    </div>
+    <div>
+      <label>Модел</label>
+      <input name="model" placeholder="Golf">
+    </div>
+    <div>
+      <label>Година</label>
+      <input name="year" inputmode="numeric" placeholder="2012">
+    </div>
+    <div>
+      <label>Двигател</label>
+      <input name="engine" placeholder="1.9 TDI">
+    </div>
+    <div>
+      <label>VIN / рама</label>
+      <input name="vin" maxlength="17" placeholder="рама">
+    </div>
+    <button type="submit">Търси части</button>
+  </form>
+  <div class="avtomol-live-parts__status" data-status></div>
+  <div class="avtomol-live-parts__results" data-results></div>
+</section>
+
+<style>
+  .avtomol-live-parts {
+    background: #103958;
+    color: #fff;
+    padding: 18px;
+    font-family: inherit;
+  }
+  .avtomol-live-parts__form {
+    max-width: 1620px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.2fr repeat(5, minmax(120px, 1fr)) auto;
+    gap: 10px;
+    align-items: end;
+  }
+  .avtomol-live-parts label {
+    display: block;
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .avtomol-live-parts input {
+    width: 100%;
+    min-height: 50px;
+    border: 0;
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: #182333;
+    background: #fff;
+    font: inherit;
+  }
+  .avtomol-live-parts button {
+    min-height: 50px;
+    border: 0;
+    border-radius: 6px;
+    background: #18a7df;
+    color: #fff;
+    padding: 10px 18px;
+    font: inherit;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .avtomol-live-parts__status {
+    max-width: 1620px;
+    margin: 12px auto 0;
+    font-size: 14px;
+  }
+  .avtomol-live-parts__results {
+    max-width: 1620px;
+    margin: 14px auto 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 10px;
+  }
+  .avtomol-live-part-card {
+    background: #fff;
+    color: #1a2532;
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid rgba(0,0,0,.08);
+  }
+  .avtomol-live-part-card strong {
+    display: block;
+    font-size: 15px;
+    line-height: 1.25;
+  }
+  .avtomol-live-part-card small {
+    display: block;
+    color: #516070;
+    margin-top: 5px;
+  }
+  .avtomol-live-part-card a {
+    display: inline-block;
+    margin-top: 9px;
+    color: #006fbd;
+    font-weight: 800;
+    text-decoration: none;
+  }
+  @media (max-width: 1100px) {
+    .avtomol-live-parts__form {
+      grid-template-columns: 1fr 1fr;
+    }
+    .avtomol-live-parts button {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (max-width: 640px) {
+    .avtomol-live-parts__form {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    var API_BASE = 'https://avtomol-agent.onrender.com';
+
+    function esc(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+      });
+    }
+
+    function price(product) {
+      if (!product.price || Number(product.price) <= 1) return 'Цена при запитване';
+      return Number(product.price).toFixed(2) + ' ' + (product.currency || 'BGN');
+    }
+
+    function card(product) {
+      var oem = (product.oemNumbers || []).slice(0, 4).join(', ');
+      return [
+        '<article class="avtomol-live-part-card">',
+        '<strong>', esc(product.name), '</strong>',
+        '<small>Марка: ', esc(product.vendor || '-'), '</small>',
+        '<small>Артикул: ', esc(product.sku || product.articleNumber || '-'), '</small>',
+        oem ? '<small>OEM: ' + esc(oem) + '</small>' : '',
+        '<small>Цена с ДДС: ', esc(price(product)), '</small>',
+        '<small>', product.inStock ? 'Налично' : 'Запитване на Viber 0876 778 357', '</small>',
+        product.url ? '<a href="' + esc(product.url) + '">Отвори</a>' : '',
+        '</article>'
+      ].join('');
+    }
+
+    function install(root) {
+      var form = root.querySelector('form');
+      var status = root.querySelector('[data-status]');
+      var results = root.querySelector('[data-results]');
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        var data = new FormData(form);
+        var params = new URLSearchParams({ type: 'parts', limit: '48' });
+        ['q', 'make', 'model', 'year', 'engine', 'vin'].forEach(function (key) {
+          var value = String(data.get(key) || '').trim();
+          if (key === 'vin') value = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          if (value) params.set(key, value);
+        });
+
+        status.textContent = 'Търся в пълния каталог с части...';
+        results.innerHTML = '';
+        fetch(API_BASE + '/api/catalog/search?' + params.toString())
+          .then(function (response) { return response.json(); })
+          .then(function (payload) {
+            if (!payload.items || !payload.items.length) {
+              status.textContent = 'Няма точен артикул по тези данни в каталога. Изпратете VIN/рама, двигател и търсената част във Viber 0876 778 357 за проверка и оферта.';
+              return;
+            }
+            status.textContent = 'Намерени артикули: ' + payload.count;
+            results.innerHTML = payload.items.map(card).join('');
+          })
+          .catch(function () {
+            status.textContent = 'Временно няма връзка с каталога. Изпратете запитване на Viber 0876 778 357.';
+          });
+      });
+    }
+
+    document.querySelectorAll('[data-avtomol-live-parts]').forEach(install);
+  })();
+</script>

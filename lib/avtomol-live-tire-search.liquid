@@ -1,0 +1,251 @@
+<section class="avtomol-live-tires" data-avtomol-live-tires>
+  <div class="avtomol-live-tires__title">🔍 Търсене на гуми</div>
+  <div class="avtomol-live-tires__brandbar" data-brands></div>
+  <form class="avtomol-live-tires__form">
+    <select name="width"><option value="">Ширина</option></select>
+    <select name="height"><option value="">Височина</option></select>
+    <select name="rim"><option value="">Диаметър</option></select>
+    <select name="season">
+      <option value="">Сезон</option>
+      <option value="winter">Зимни гуми</option>
+      <option value="summer">Летни гуми</option>
+      <option value="all-season">Всесезонни</option>
+    </select>
+    <input name="q" placeholder="Марка или размер, напр. Michelin 205/55R16">
+    <button type="submit">🔍 ТЪРСИ</button>
+  </form>
+  <div class="avtomol-live-tires__status" data-status></div>
+  <div class="avtomol-live-tires__results" data-results></div>
+</section>
+
+<style>
+  .avtomol-live-tires {
+    background: #1b1b1b;
+    color: #ffd900;
+    padding: 24px 20px;
+    border-radius: 6px;
+    font-family: inherit;
+  }
+  .avtomol-live-tires__title {
+    background: #ffd400;
+    color: #070707;
+    border-radius: 8px;
+    padding: 18px;
+    text-align: center;
+    font-size: 22px;
+    font-weight: 900;
+  }
+  .avtomol-live-tires__brandbar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin: 18px auto 14px;
+    max-width: 1600px;
+  }
+  .avtomol-live-tires__brandbar button {
+    border: 2px solid #ffd400;
+    background: #232323;
+    color: #ffd400;
+    border-radius: 7px;
+    padding: 10px 14px;
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  .avtomol-live-tires__brandbar button.is-active {
+    background: #ffd400;
+    color: #111;
+  }
+  .avtomol-live-tires__form {
+    max-width: 1600px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(120px, 1fr)) minmax(240px, 1.3fr) auto;
+    gap: 10px;
+  }
+  .avtomol-live-tires select,
+  .avtomol-live-tires input {
+    min-height: 48px;
+    border: 0;
+    border-radius: 5px;
+    background: #fff;
+    color: #111;
+    padding: 9px 12px;
+    font: inherit;
+  }
+  .avtomol-live-tires__form button {
+    min-height: 48px;
+    border: 0;
+    border-radius: 6px;
+    background: #ffd400;
+    color: #050505;
+    padding: 10px 18px;
+    font: inherit;
+    font-weight: 900;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .avtomol-live-tires__status {
+    max-width: 1600px;
+    margin: 14px auto 0;
+    color: #fff;
+  }
+  .avtomol-live-tires__results {
+    max-width: 1600px;
+    margin: 14px auto 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+  }
+  .avtomol-live-tire-card {
+    background: #fff;
+    color: #141414;
+    border-radius: 8px;
+    padding: 12px;
+    border: 2px solid #ffd400;
+  }
+  .avtomol-live-tire-card strong {
+    display: block;
+    line-height: 1.25;
+  }
+  .avtomol-live-tire-card small {
+    display: block;
+    margin-top: 5px;
+    color: #4c4c4c;
+  }
+  .avtomol-live-tire-card a {
+    display: inline-block;
+    margin-top: 9px;
+    color: #005fb8;
+    font-weight: 900;
+    text-decoration: none;
+  }
+  @media (max-width: 1100px) {
+    .avtomol-live-tires__form {
+      grid-template-columns: 1fr 1fr;
+    }
+    .avtomol-live-tires__form button,
+    .avtomol-live-tires input {
+      grid-column: 1 / -1;
+    }
+  }
+  @media (max-width: 560px) {
+    .avtomol-live-tires__form {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    var API_BASE = 'https://avtomol-agent.onrender.com';
+    var selectedBrand = '';
+
+    function esc(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function (char) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char];
+      });
+    }
+
+    function seasonName(value) {
+      return { winter: 'Зимни', summer: 'Летни', 'all-season': 'Всесезонни' }[value] || value || '-';
+    }
+
+    function fillSelect(select, items) {
+      var first = select.querySelector('option');
+      select.innerHTML = '';
+      select.appendChild(first);
+      (items || []).forEach(function (item) {
+        var option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.value + ' (' + item.count + ')';
+        select.appendChild(option);
+      });
+    }
+
+    function price(product) {
+      if (!product.price || Number(product.price) <= 1) return 'Цена при запитване';
+      return Number(product.price).toFixed(2) + ' ' + (product.currency || 'EUR');
+    }
+
+    function card(product) {
+      return [
+        '<article class="avtomol-live-tire-card">',
+        '<strong>', esc(product.name), '</strong>',
+        '<small>Марка: ', esc(product.vendor || product.tireBrand || '-'), '</small>',
+        '<small>Размер: ', esc((product.tireSizes || []).join(', ') || '-'), '</small>',
+        '<small>Сезон: ', esc(seasonName(product.season)), '</small>',
+        '<small>Цена: ', esc(price(product)), '</small>',
+        '<small>', product.inStock ? 'Налично' : 'Запитване на Viber 0876 778 357', '</small>',
+        product.url ? '<a href="' + esc(product.url) + '">Отвори</a>' : '',
+        '</article>'
+      ].join('');
+    }
+
+    function search(root) {
+      var form = root.querySelector('form');
+      var status = root.querySelector('[data-status]');
+      var results = root.querySelector('[data-results]');
+      var data = new FormData(form);
+      var params = new URLSearchParams({ type: 'tires', limit: '60' });
+      ['width', 'height', 'rim', 'season', 'q'].forEach(function (key) {
+        var value = String(data.get(key) || '').trim();
+        if (value) params.set(key, value);
+      });
+      if (selectedBrand) params.set('brand', selectedBrand);
+
+      status.textContent = 'Търся във всички гуми...';
+      results.innerHTML = '';
+      fetch(API_BASE + '/api/catalog/search?' + params.toString())
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          if (!payload.items || !payload.items.length) {
+            status.textContent = 'В каталога няма точна гума по тези условия. Изпратете размер, сезон, марка и брой на Viber 0876 778 357 за проверка и оферта.';
+            return;
+          }
+          status.textContent = 'Намерени гуми: ' + payload.count;
+          results.innerHTML = payload.items.map(card).join('');
+        })
+        .catch(function () {
+          status.textContent = 'Временно няма връзка с каталога. Изпратете запитване на Viber 0876 778 357.';
+        });
+    }
+
+    function install(root) {
+      var form = root.querySelector('form');
+      var status = root.querySelector('[data-status]');
+      var brandbar = root.querySelector('[data-brands]');
+
+      fetch(API_BASE + '/api/catalog/options')
+        .then(function (response) { return response.json(); })
+        .then(function (payload) {
+          var tires = payload.tires || {};
+          fillSelect(form.elements.width, tires.widths);
+          fillSelect(form.elements.height, tires.heights);
+          fillSelect(form.elements.rim, tires.rims);
+          brandbar.innerHTML = (tires.brands || []).map(function (item) {
+            return '<button type="button" data-brand="' + esc(item.value) + '">' + esc(item.value) + '</button>';
+          }).join('');
+          status.textContent = 'Заредени гуми в каталога: ' + (tires.count || 0);
+        });
+
+      brandbar.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-brand]');
+        if (!button) return;
+        selectedBrand = selectedBrand === button.dataset.brand ? '' : button.dataset.brand;
+        brandbar.querySelectorAll('button').forEach(function (item) {
+          item.classList.toggle('is-active', item.dataset.brand === selectedBrand);
+        });
+        search(root);
+      });
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        search(root);
+      });
+    }
+
+    document.querySelectorAll('[data-avtomol-live-tires]').forEach(install);
+  })();
+</script>
