@@ -5,6 +5,7 @@ const http = require("node:http");
 const { URL } = require("node:url");
 const { ensureDir, loadEnvFile, readJson } = require("./lib/config");
 const { buildOutfitSuggestions, pickFocusSuggestion, searchProducts } = require("./lib/catalog");
+const { buildCatalogOptions, buildVehicleTree, searchCatalog } = require("./lib/catalog-api");
 const { callOpenAI, detectLanguage, extractLead, findFaqAnswer, generateFallbackReply } = require("./lib/assistant");
 
 const projectRoot = __dirname;
@@ -304,6 +305,21 @@ async function handleChat(request, response, origin) {
   );
 }
 
+async function handleCatalogOptions(response, origin) {
+  const products = await getProducts();
+  sendJson(response, 200, buildCatalogOptions(products), origin);
+}
+
+async function handleCatalogSearch(url, response, origin) {
+  const products = await getProducts();
+  sendJson(response, 200, searchCatalog(products, url.searchParams), origin);
+}
+
+async function handleVehicleTree(response, origin) {
+  const products = await getProducts();
+  sendJson(response, 200, buildVehicleTree(products), origin);
+}
+
 async function bootstrap() {
   await ensureDir(workDir);
   const [, products] = await Promise.all([getProfile(), getProducts()]);
@@ -329,6 +345,36 @@ async function bootstrap() {
         },
         origin
       );
+      return;
+    }
+
+    if (url.pathname === "/api/catalog/options" && request.method === "GET") {
+      try {
+        await handleCatalogOptions(response, origin);
+      } catch (error) {
+        console.error("Catalog options error:", error);
+        sendJson(response, 500, { error: "Catalog options failed." }, origin);
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/catalog/search" && request.method === "GET") {
+      try {
+        await handleCatalogSearch(url, response, origin);
+      } catch (error) {
+        console.error("Catalog search error:", error);
+        sendJson(response, 500, { error: "Catalog search failed." }, origin);
+      }
+      return;
+    }
+
+    if (url.pathname === "/api/vehicles/tree" && request.method === "GET") {
+      try {
+        await handleVehicleTree(response, origin);
+      } catch (error) {
+        console.error("Vehicle tree error:", error);
+        sendJson(response, 500, { error: "Vehicle tree failed." }, origin);
+      }
       return;
     }
 
