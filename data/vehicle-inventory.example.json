@@ -1,0 +1,1 @@
+{"vehicles":[{"incomingNumber":"TEST-001","status":"available","title":"Примерен автомобил","price":25000,"images":["https://example.com/vehicle.jpg"],"brand":"Пример","model":"Модел","year":2022,"mileage":45000,"fuel":"Бензин","transmission":"Автоматик"}]}
