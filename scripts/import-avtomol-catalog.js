@@ -212,15 +212,22 @@ function mapShopifyProduct(product) {
   const title = String(product.title || "").replace(/\s*\|\s*AvtoMol\.com\s*$/i, "").trim();
   const description = stripHtml(product.body_html || "");
   const haystack = [title, description, product.handle, product.product_type, product.vendor, (product.tags || []).join(" ")].join(" ");
-  const partTypes = detectPartTypes(haystack);
+  const normalizedTags = (product.tags || []).map((tag) => normalizeText(tag));
+  const normalizedType = normalizeText(product.product_type);
+  const isVehicle =
+    normalizedTags.includes("vehicle sync") ||
+    normalizedType === "with mileage" ||
+    normalizedType.includes("avtomobil") ||
+    normalizedType.includes("vehicle");
+  const partTypes = isVehicle ? ["vehicles"] : detectPartTypes(haystack);
   const price = minVariantPrice(product.variants);
 
   return {
     id: `avtomol-${product.id}`,
     source: "avtomol",
     name: title,
-    category: categoryFromPartTypes(partTypes),
-    productType: product.product_type || categoryFromPartTypes(partTypes),
+    category: isVehicle ? "Автомобили" : categoryFromPartTypes(partTypes),
+    productType: product.product_type || (isVehicle ? "Автомобили" : categoryFromPartTypes(partTypes)),
     vendor: product.vendor || "AvtoMol.com",
     summary: firstSentence(description || title),
     description: firstSentence(description, 700),
@@ -241,6 +248,7 @@ function mapShopifyProduct(product) {
     tireBrand: "",
     season: detectSeason(haystack),
     yearRanges: extractYearRanges(haystack),
+    isVehicle,
   };
 }
 
