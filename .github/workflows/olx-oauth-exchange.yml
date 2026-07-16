@@ -1,0 +1,32 @@
+name: OLX OAuth exchange
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exchange:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+      OLX_AUTHORIZATION_CODE: ${{ secrets.OLX_AUTHORIZATION_CODE }}
+      OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Exchange authorization code
+        run: node scripts/olx-oauth-exchange.js
+      - name: Encrypt token response
+        run: openssl enc -aes-256-cbc -salt -pbkdf2 -in "$RUNNER_TEMP/olx-token.json" -out olx-token.enc -pass env:OLX_TOKEN_TRANSFER_KEY
+      - name: Upload encrypted token
+        uses: actions/upload-artifact@v4
+        with:
+          name: olx-token-encrypted
+          path: olx-token.enc
+          retention-days: 1
