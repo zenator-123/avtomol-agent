@@ -80,7 +80,8 @@ async function main() {
     const update = updates[index];
     const url = `https://www.olx.bg/api/partner/adverts/${update.olx_ad_id}`;
     try {
-      const { json: current } = await request(url, { headers });
+      const { json } = await request(url, { headers });
+      const current = json?.data || json;
       if (!current || current.id !== update.olx_ad_id) throw new Error('OLX returned a different advert');
       if (current.status !== 'active') throw new Error(`Advert is not active: ${current.status}`);
       if (current.external_id !== update.external_id) throw new Error(`External ID mismatch: ${current.external_id}`);
