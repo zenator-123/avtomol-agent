@@ -1,0 +1,42 @@
+name: Avtomol daily vehicle sync
+
+on:
+  schedule:
+    - cron: '15 3 * * *'
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: 'Изпълни реални промени'
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: avtomol-daily-vehicle-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      INVENTORY_FEED_URL: ${{ secrets.INVENTORY_FEED_URL }}
+      INVENTORY_FEED_TOKEN: ${{ secrets.INVENTORY_FEED_TOKEN }}
+      SYNC_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_changes == true && 'false' || vars.SYNC_DRY_RUN || 'true' }}
+      MAX_DELETIONS_PER_RUN: ${{ vars.MAX_DELETIONS_PER_RUN || '20' }}
+      MIN_INVENTORY_COUNT: ${{ vars.MIN_INVENTORY_COUNT || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts
+      - name: Synchronize Avtomol.com and Facebook
+        run: npm run sync:vehicles
