@@ -5,6 +5,7 @@
   "description": "Embeddable AI auto-parts consultant for AvtoMol.com",
   "scripts": {
     "import:catalog": "node scripts/import-avtomol-catalog.js",
+    "sync:vehicles": "node scripts/daily-vehicle-sync.js",
     "start": "node server.js",
     "test": "node --test"
   }
