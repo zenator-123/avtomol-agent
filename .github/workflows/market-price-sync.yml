@@ -1,0 +1,84 @@
+﻿name: Avtomol market price sync
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - data/market-price-updates-800.json
+      - data/market-price-sync-control.json
+      - scripts/update-market-prices.js
+      - .github/workflows/market-price-sync.yml
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: Apply real price changes
+        required: true
+        type: boolean
+        default: false
+      channel:
+        description: Channel to synchronize
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - shopify
+          - facebook
+      limit:
+        description: Unique vehicles to process (0 means all)
+        required: true
+        type: string
+        default: '0'
+
+concurrency:
+  group: avtomol-market-price-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+      SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      EVENT_NAME: ${{ github.event_name }}
+      INPUT_APPLY: ${{ inputs.apply_changes }}
+      INPUT_CHANNEL: ${{ inputs.channel }}
+      INPUT_LIMIT: ${{ inputs.limit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read safety controls
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const control = JSON.parse(fs.readFileSync('data/market-price-sync-control.json', 'utf8'));
+          const dispatch = process.env.EVENT_NAME === 'workflow_dispatch';
+          const apply = dispatch ? process.env.INPUT_APPLY === 'true' : control.apply_changes === true;
+          const channel = dispatch ? (process.env.INPUT_CHANNEL || 'all') : (control.channel || 'all');
+          const limit = dispatch ? (process.env.INPUT_LIMIT || '0') : String(control.limit || 0);
+          fs.appendFileSync(process.env.GITHUB_ENV, 'APPLY_PRICE_CHANGES=' + apply + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, 'PRICE_SYNC_CHANNEL=' + channel + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, 'PRICE_SYNC_LIMIT=' + limit + '\n');
+          console.log(JSON.stringify({ apply, channel, limit }));
+          NODE
+      - name: Validate price plan
+        run: node -e "const x=require('./data/market-price-updates-800.json'); if(x.count!==800||new Set(x.updates.map(v=>v.olx_ad_id)).size!==800) throw new Error('Expected 800 unique advert plans')"
+      - name: Synchronize Avtomol.com and Facebook
+        run: node scripts/update-market-prices.js
+      - name: Upload synchronization report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-price-sync-report
+          path: price-sync-report.json
+          if-no-files-found: warn
