@@ -48,13 +48,15 @@ function fullUpdatePayload(advert, update) {
     location: advert.location,
     images: (advert.images || []).map(({ url }) => ({ url })),
     price: {
-      value: update.new_price_eur.toFixed(2),
+      value: update.new_price_eur,
       currency: advert.price.currency,
       negotiable: Boolean(advert.price.negotiable),
       budget: Boolean(advert.price.budget),
       trade: Boolean(advert.price.trade),
     },
-    attributes: (advert.attributes || []).map(({ code, value, values }) => ({ code, value, values })),
+    attributes: (advert.attributes || []).map(({ code, value, values }) =>
+      Array.isArray(values) && values.length ? { code, values } : { code, value: String(value) }
+    ),
     courier: Boolean(advert.courier),
     auto_extend_enabled: Boolean(advert.auto_extend_enabled),
   };
