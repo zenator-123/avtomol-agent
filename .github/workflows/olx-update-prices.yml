@@ -1,0 +1,49 @@
+name: OLX update Bulgarian market prices
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Safety mode
+        required: true
+        type: choice
+        default: dry-run
+        options:
+          - dry-run
+          - pilot
+          - batch
+      batch_limit:
+        description: Optional maximum number of adverts (0 means all)
+        required: true
+        default: '0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: olx-price-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      UPDATE_SCOPE: ${{ inputs.scope }}
+      BATCH_LIMIT: ${{ inputs.batch_limit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate and update OLX prices
+        run: node scripts/olx-update-prices.js
+      - name: Upload safety report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: olx-price-update-${{ inputs.scope }}
+          path: ${{ runner.temp }}/olx-price-update-${{ inputs.scope }}.json
+          retention-days: 7
+          if-no-files-found: warn
