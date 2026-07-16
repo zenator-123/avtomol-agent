@@ -4,6 +4,7 @@ const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const DRY_RUN = String(process.env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false';
 const MAX_DELETIONS = Number(process.env.MAX_DELETIONS_PER_RUN || 20);
 const MIN_INVENTORY = Number(process.env.MIN_INVENTORY_COUNT || 10);
+const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCase() === 'true';
 
 function pick(object, names) {
   for (const name of names) {
@@ -30,6 +31,7 @@ function normalizeVehicle(raw) {
     mileage: String(pick(raw, ['mileage', 'auto_mileage']) || '').trim(),
     fuel: String(pick(raw, ['fuel', 'engineType', 'auto_engine_type']) || '').trim(),
     transmission: String(pick(raw, ['transmission', 'auto_transmission_type']) || '').trim(),
+    handle: String(pick(raw, ['handle', 'productHandle', 'product_handle']) || '').trim(),
   };
 }
 
@@ -86,25 +88,48 @@ async function getShopifyAccessToken(shop) {
   return cachedShopifyToken;
 }
 
-async function listManagedProducts() {
+function mapManagedProduct(product) {
+  return {
+    ...product,
+    incomingNumber: product.metafield?.value || '',
+    facebookPostId: product.facebookPost?.value || '',
+    variantId: product.variants?.nodes?.[0]?.id || '',
+    price: Number(product.variants?.nodes?.[0]?.price || 0),
+  };
+}
+
+async function listManagedProducts(vehicles = []) {
   const query = process.env.SHOPIFY_MANAGED_QUERY || 'tag:vehicle-sync';
   const products = [];
   let cursor = null;
   do {
     const data = await shopifyGraphql(`query ManagedVehicles($cursor: String, $query: String!) {
       products(first: 100, after: $cursor, query: $query) {
-        nodes { id title handle metafield(namespace: "custom", key: "incoming_number") { value }
+        nodes { id title handle variants(first: 1) { nodes { id price } }
+          metafield(namespace: "custom", key: "incoming_number") { value }
           facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } }
         pageInfo { hasNextPage endCursor }
       }
     }`, { cursor, query });
-    products.push(...data.products.nodes.map((product) => ({
-      ...product,
-      incomingNumber: product.metafield?.value || '',
-      facebookPostId: product.facebookPost?.value || '',
-    })));
+    products.push(...data.products.nodes.map(mapManagedProduct));
     cursor = data.products.pageInfo.hasNextPage ? data.products.pageInfo.endCursor : null;
   } while (cursor);
+  const knownHandles = new Set(products.map((product) => product.handle));
+  for (const vehicle of vehicles) {
+    if (!vehicle.handle || knownHandles.has(vehicle.handle)) continue;
+    const data = await shopifyGraphql(`query VehicleByHandle($query: String!) {
+      products(first: 1, query: $query) { nodes { id title handle variants(first: 1) { nodes { id price } }
+        metafield(namespace: "custom", key: "incoming_number") { value }
+        facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } } }
+    }`, { query: `handle:${vehicle.handle}` });
+    const product = data.products.nodes[0];
+    if (product) {
+      const mapped = mapManagedProduct(product);
+      mapped.incomingNumber = mapped.incomingNumber || vehicle.incomingNumber;
+      products.push(mapped);
+      knownHandles.add(mapped.handle);
+    }
+  }
   return products.filter((product) => product.incomingNumber);
 }
 
@@ -124,10 +149,10 @@ function vehicleDescription(vehicle) {
 }
 
 async function createShopifyProduct(vehicle) {
-  if (DRY_RUN) return { id: `dry-run:${vehicle.incomingNumber}`, handle: slug(`${vehicle.title}-${vehicle.incomingNumber}`) };
+  if (DRY_RUN) return { id: `dry-run:${vehicle.incomingNumber}`, handle: vehicle.handle || slug(`${vehicle.title}-${vehicle.incomingNumber}`) };
   const product = {
     title: vehicle.title,
-    handle: slug(`${vehicle.title}-${vehicle.incomingNumber}`),
+    handle: vehicle.handle || slug(`${vehicle.title}-${vehicle.incomingNumber}`),
     descriptionHtml: vehicleDescription(vehicle),
     vendor: 'AvtoMol.com',
     productType: 'Автомобили',
@@ -152,6 +177,18 @@ async function createShopifyProduct(vehicle) {
   return created;
 }
 
+async function updateShopifyProductPrice(product, vehicle) {
+  if (!vehicle.price || !product.variantId || Math.abs(Number(product.price) - vehicle.price) < 0.01) return false;
+  if (DRY_RUN) return true;
+  const update = await shopifyGraphql(`mutation PriceVehicle($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+    productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } }
+  }`, { productId: product.id, variants: [{ id: product.variantId, price: vehicle.price.toFixed(2) }] });
+  if (update.productVariantsBulkUpdate.userErrors.length) {
+    throw new Error(`Shopify price rejected: ${JSON.stringify(update.productVariantsBulkUpdate.userErrors)}`);
+  }
+  return true;
+}
+
 async function deleteShopifyProduct(product) {
   if (DRY_RUN) return;
   const data = await shopifyGraphql(`mutation DeleteVehicle($input: ProductDeleteInput!) {
@@ -170,15 +207,44 @@ async function facebookRequest(path, options = {}) {
   return json;
 }
 
+function facebookMessage(vehicle) {
+  return [
+    `ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}`,
+    vehicle.title,
+    `КРАЙНА ЦЕНА: ${vehicle.price.toFixed(2)} EUR`,
+    vehicle.year && `Година: ${vehicle.year}`,
+    vehicle.mileage && `Пробег: ${vehicle.mileage} км`,
+    'Доставката до България е включена в цената.',
+    'При поръчка се издава проформа фактура. След плащането автомобилът се доставя в указания срок.',
+    'Телефон: 0876 778 357',
+  ].filter(Boolean).join('\n');
+}
+
 async function publishFacebookPost(vehicle, productHandle) {
   if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return '';
   if (DRY_RUN) return `dry-run:${vehicle.incomingNumber}`;
-  const message = [`ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}`, vehicle.title, `Цена: ${vehicle.price.toFixed(2)} лв.`,
-    vehicle.year && `Година: ${vehicle.year}`, vehicle.mileage && `Пробег: ${vehicle.mileage}`,
-    'Проверени автомобили от Европа и авточасти за всички видове автомобили.', 'Телефон: 0876 778 357'].filter(Boolean).join('\n');
+  const message = facebookMessage(vehicle);
   const body = new URLSearchParams({ message, link: `https://avtomol.com/products/${productHandle}` });
   const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/feed`, { method: 'POST', body });
   return result.id;
+}
+
+async function listFacebookPostsByIncomingNumber() {
+  const posts = new Map();
+  if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return posts;
+  const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/feed?fields=id,message&limit=100`);
+  for (const post of result.data || []) {
+    const stock = String(post.message || '').match(/ВХОДЯЩ НОМЕР:\s*([A-Z]{2}\d{5})/i)?.[1]?.toUpperCase();
+    if (stock) posts.set(stock, post.id);
+  }
+  return posts;
+}
+
+async function updateFacebookPost(postId, vehicle) {
+  if (!postId || !process.env.FACEBOOK_PAGE_ACCESS_TOKEN) return false;
+  if (DRY_RUN) return true;
+  await facebookRequest(postId, { method: 'POST', body: new URLSearchParams({ message: facebookMessage(vehicle) }) });
+  return true;
 }
 
 async function saveFacebookPostId(productId, postId) {
@@ -197,17 +263,31 @@ async function deleteFacebookPost(postId) {
 async function main() {
   const inventory = await loadInventory();
   const available = new Map(inventory.filter((vehicle) => vehicle.available).map((vehicle) => [vehicle.incomingNumber, vehicle]));
-  const products = await listManagedProducts();
+  const products = await listManagedProducts([...available.values()]);
   const existing = new Map(products.map((product) => [product.incomingNumber, product]));
   const sold = products.filter((product) => !available.has(product.incomingNumber));
   const additions = [...available.values()].filter((vehicle) => !existing.has(vehicle.incomingNumber));
-  if (sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
-  console.log(JSON.stringify({ dryRun: DRY_RUN, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length }));
+  const updates = [...available.values()].filter((vehicle) => existing.has(vehicle.incomingNumber));
+  const facebookPosts = await listFacebookPostsByIncomingNumber();
+  if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
+  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
-  for (const product of sold) {
-    console.log(`${DRY_RUN ? 'WOULD DELETE' : 'DELETE'} ${product.incomingNumber} ${product.title}`);
-    await deleteFacebookPost(product.facebookPostId);
-    await deleteShopifyProduct(product);
+  if (ALLOW_DELETIONS) {
+    for (const product of sold) {
+      console.log(`${DRY_RUN ? 'WOULD DELETE' : 'DELETE'} ${product.incomingNumber} ${product.title}`);
+      await deleteFacebookPost(product.facebookPostId);
+      await deleteShopifyProduct(product);
+    }
+  } else if (sold.length) {
+    console.log(`SKIP ${sold.length} deletions because ALLOW_DELETIONS is false`);
+  }
+  for (const vehicle of updates) {
+    const product = existing.get(vehicle.incomingNumber);
+    const priceChanged = await updateShopifyProductPrice(product, vehicle);
+    const postId = product.facebookPostId || facebookPosts.get(vehicle.incomingNumber) || '';
+    const facebookChanged = await updateFacebookPost(postId, vehicle);
+    if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
+    console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
   }
   for (const vehicle of additions) {
     console.log(`${DRY_RUN ? 'WOULD ADD' : 'ADD'} ${vehicle.incomingNumber} ${vehicle.title}`);

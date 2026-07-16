@@ -33,6 +33,7 @@ jobs:
       SYNC_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.apply_changes == true && 'false' || vars.SYNC_DRY_RUN || 'true' }}
       MAX_DELETIONS_PER_RUN: ${{ vars.MAX_DELETIONS_PER_RUN || '20' }}
       MIN_INVENTORY_COUNT: ${{ vars.MIN_INVENTORY_COUNT || '10' }}
+      ALLOW_DELETIONS: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
