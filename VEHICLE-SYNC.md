@@ -12,7 +12,7 @@
 ## GitHub Secrets
 
 - `SHOPIFY_SHOP_DOMAIN` — реалният `*.myshopify.com` домейн;
-- `SHOPIFY_ACCESS_TOKEN` — токен с `read_products` и `write_products`;
+- `SHOPIFY_CLIENT_ID` и `SHOPIFY_CLIENT_SECRET` — приложението автоматично получава нов 24-часов токен при всяко изпълнение;
 - `FACEBOOK_PAGE_ID`;
 - `FACEBOOK_PAGE_ACCESS_TOKEN` — достъп до управляваната страница;
 - `INVENTORY_FEED_URL` — JSON адрес с актуалните автомобили;
