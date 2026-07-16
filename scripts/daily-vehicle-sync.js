@@ -82,8 +82,16 @@ async function getShopifyAccessToken(shop) {
     client_id: env('SHOPIFY_CLIENT_ID'),
     client_secret: env('SHOPIFY_CLIENT_SECRET'),
   });
-  const response = await fetch(`https://${shop}/admin/oauth/access_token`, { method: 'POST', body });
-  const json = await response.json();
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+    body,
+    redirect: 'manual',
+  });
+  const responseText = await response.text();
+  let json;
+  try { json = JSON.parse(responseText); }
+  catch { throw new Error(`Shopify authentication returned ${response.status} ${response.headers.get('content-type') || 'unknown content type'}${response.headers.get('location') ? ` redirect=${response.headers.get('location')}` : ''}`); }
   if (!response.ok || !json.access_token) throw new Error(`Shopify authentication failed: ${json.error_description || json.error || response.status}`);
   cachedShopifyToken = json.access_token;
   return cachedShopifyToken;
