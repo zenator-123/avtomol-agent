@@ -5,6 +5,7 @@ const DRY_RUN = String(process.env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'fa
 const MAX_DELETIONS = Number(process.env.MAX_DELETIONS_PER_RUN || 20);
 const MIN_INVENTORY = Number(process.env.MIN_INVENTORY_COUNT || 10);
 const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCase() === 'true';
+const ALLOW_ADDITIONS = String(process.env.ALLOW_ADDITIONS || 'false').toLowerCase() === 'true';
 
 function pick(object, names) {
   for (const name of names) {
@@ -270,7 +271,7 @@ async function main() {
   const updates = [...available.values()].filter((vehicle) => existing.has(vehicle.incomingNumber));
   const facebookPosts = await listFacebookPostsByIncomingNumber();
   if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
-  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
+  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
   if (ALLOW_DELETIONS) {
     for (const product of sold) {
@@ -289,11 +290,15 @@ async function main() {
     if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
     console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
   }
-  for (const vehicle of additions) {
-    console.log(`${DRY_RUN ? 'WOULD ADD' : 'ADD'} ${vehicle.incomingNumber} ${vehicle.title}`);
-    const product = await createShopifyProduct(vehicle);
-    const postId = await publishFacebookPost(vehicle, product.handle);
-    await saveFacebookPostId(product.id, postId);
+  if (ALLOW_ADDITIONS) {
+    for (const vehicle of additions) {
+      console.log(`${DRY_RUN ? 'WOULD ADD' : 'ADD'} ${vehicle.incomingNumber} ${vehicle.title}`);
+      const product = await createShopifyProduct(vehicle);
+      const postId = await publishFacebookPost(vehicle, product.handle);
+      await saveFacebookPostId(product.id, postId);
+    }
+  } else if (additions.length) {
+    console.log(`SKIP ${additions.length} additions because ALLOW_ADDITIONS is false`);
   }
 }
 
