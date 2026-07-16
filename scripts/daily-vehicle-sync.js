@@ -59,14 +59,31 @@ function env(name) {
 
 async function shopifyGraphql(query, variables = {}) {
   const shop = env('SHOPIFY_SHOP_DOMAIN').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const token = await getShopifyAccessToken(shop);
   const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': env('SHOPIFY_ACCESS_TOKEN') },
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),
   });
   const json = await response.json();
   if (!response.ok || json.errors) throw new Error(`Shopify request failed: ${response.status} ${JSON.stringify(json.errors || json)}`);
   return json.data;
+}
+
+let cachedShopifyToken = '';
+async function getShopifyAccessToken(shop) {
+  if (process.env.SHOPIFY_ACCESS_TOKEN) return process.env.SHOPIFY_ACCESS_TOKEN;
+  if (cachedShopifyToken) return cachedShopifyToken;
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: env('SHOPIFY_CLIENT_ID'),
+    client_secret: env('SHOPIFY_CLIENT_SECRET'),
+  });
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, { method: 'POST', body });
+  const json = await response.json();
+  if (!response.ok || !json.access_token) throw new Error(`Shopify authentication failed: ${json.error_description || json.error || response.status}`);
+  cachedShopifyToken = json.access_token;
+  return cachedShopifyToken;
 }
 
 async function listManagedProducts() {
