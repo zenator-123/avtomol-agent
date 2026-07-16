@@ -61,7 +61,7 @@ jobs:
         run: |
           node <<'NODE'
           const fs = require('fs');
-          const control = JSON.parse(fs.readFileSync('data/market-price-sync-control.json', 'utf8'));
+          const control = JSON.parse(fs.readFileSync('data/market-price-sync-control.json', 'utf8').replace(/^\uFEFF/, ''));
           const dispatch = process.env.EVENT_NAME === 'workflow_dispatch';
           const apply = dispatch ? process.env.INPUT_APPLY === 'true' : control.apply_changes === true;
           const channel = dispatch ? (process.env.INPUT_CHANNEL || 'all') : (control.channel || 'all');
