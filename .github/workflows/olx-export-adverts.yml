@@ -1,0 +1,31 @@
+name: OLX export adverts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Export current OLX adverts
+        run: node scripts/olx-export-adverts.js
+      - name: Encrypt export
+        run: openssl enc -aes-256-cbc -salt -pbkdf2 -in "$RUNNER_TEMP/olx-adverts.json" -out olx-adverts.enc -pass env:OLX_TOKEN_TRANSFER_KEY
+      - name: Upload encrypted export
+        uses: actions/upload-artifact@v4
+        with:
+          name: olx-adverts-encrypted
+          path: olx-adverts.enc
+          retention-days: 1
+          if-no-files-found: error
