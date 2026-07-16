@@ -34,11 +34,12 @@ jobs:
       MAX_DELETIONS_PER_RUN: ${{ vars.MAX_DELETIONS_PER_RUN || '20' }}
       MIN_INVENTORY_COUNT: ${{ vars.MIN_INVENTORY_COUNT || '10' }}
       ALLOW_DELETIONS: 'false'
+      ALLOW_ADDITIONS: 'false'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts --no-package-lock
       - name: Synchronize Avtomol.com and Facebook
         run: npm run sync:vehicles
