@@ -117,7 +117,7 @@ async function main() {
       report.failed++;
       report.results.push({ id: update.olx_ad_id, stock: update.stock_number, result: 'failed', error: error.message });
       console.error(`FAILED ${update.olx_ad_id} ${update.stock_number}: ${error.message}`);
-      if (scope === 'pilot') throw error;
+      // Preserve the failure report for diagnosis.
     }
   }
 
