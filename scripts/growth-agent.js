@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { analyzeHtml, buildContentPlan, summarizeLeads } = require("../lib/growth-agent");
+const { analyzeHtml, buildContentPlan, buildCompetitiveStrategy, summarizeLeads } = require("../lib/growth-agent");
 
 const root = path.resolve(__dirname, "..");
 const configPath = path.join(root, "data", "growth-agent-config.json");
@@ -130,27 +130,82 @@ function csvEscape(value) {
 
 async function buildCatalogFeeds(dayDir, config) {
   const products = await readJson(path.join(root, "data", "products.json"), []);
-  if (!Array.isArray(products) || !products.length) return { products: 0, files: [] };
-  const rows = products.map((product, index) => ({
+  const rows = (Array.isArray(products) ? products : []).map((product, index) => ({
     id: product.id || product.handle || "product-" + (index + 1),
     title: product.name || product.title || "Продукт",
-    description: product.description || product.name || product.title || "",
-    availability: Number(product.inventory ?? product.quantity ?? 1) > 0 ? "in_stock" : "out_of_stock",
+    description: product.summary || product.description || product.name || product.title || "",
+    availability: product.inStock === false || Number(product.inventory ?? product.quantity ?? 1) <= 0 ? "out_of_stock" : "in_stock",
     condition: "new",
-    price: product.price ? String(product.price).replace(/[^0-9.,]/g, "").replace(",", ".") + " EUR" : "",
+    price: product.price ? String(product.price).replace(/[^0-9.,]/g, "").replace(",", ".") + " " + (product.currency || "EUR") : "",
     link: product.url || product.link || "https://avtomol.com/",
     image_link: product.image || product.imageUrl || "",
     brand: product.vendor || product.brand || "",
   }));
-  const header = Object.keys(rows[0]);
-  const csv = [header.join(","), ...rows.map((row) => header.map((key) => csvEscape(row[key])).join(","))].join("\r\n") + "\r\n";
-  const files = [];
-  for (const channel of ["google-merchant", "meta-catalog", "tiktok-catalog"]) {
-    const file = path.join(dayDir, channel + ".csv");
-    await fs.writeFile(file, "\uFEFF" + csv, "utf8");
-    files.push(file);
+
+  function csvFor(items) {
+    if (!items.length) return "";
+    const header = Object.keys(items[0]);
+    return [header.join(","), ...items.map((row) => header.map((key) => csvEscape(row[key])).join(","))].join("\r\n") + "\r\n";
   }
-  return { products: rows.length, files };
+
+  const files = [];
+  if (rows.length) {
+    const csv = csvFor(rows);
+    for (const channel of ["google-merchant", "meta-catalog", "tiktok-catalog"]) {
+      const file = path.join(dayDir, channel + ".csv");
+      await fs.writeFile(file, "\uFEFF" + csv, "utf8");
+      files.push(file);
+    }
+  }
+
+  const inventory = await readJson(path.join(root, "data", "vehicle-inventory.json"), { vehicles: [] });
+  const uniqueVehicles = [];
+  const seen = new Set();
+  for (const vehicle of inventory?.vehicles || []) {
+    const id = String(vehicle.external_id || vehicle.incomingNumber || vehicle.id || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    let description = String(vehicle.description || vehicle.title || "")
+      .replace(/Установени щети и забележки[\s\S]*?(?=Оборудване|Цена и доставка|$)/i, "")
+      .replace(/Карта на щетите[\s\S]*?(?=Оборудване|Цена и доставка|$)/i, "")
+      .replace(/(?:печалба|ддс)[^\n]*/gi, "")
+      .replace(/употребяван автомобил с възможност за незабавна покупка\.?/gi, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    uniqueVehicles.push({
+      vehicle_id: id,
+      title: vehicle.title || [vehicle.brand, vehicle.model, vehicle.year].filter(Boolean).join(" "),
+      description,
+      availability: vehicle.status === "available" ? "in_stock" : "out_of_stock",
+      condition: "used",
+      price: Number(vehicle.price || 0).toFixed(2) + " EUR",
+      url: vehicle.url || ("https://avtomol.com/products/" + (vehicle.handle || id)),
+      image: Array.isArray(vehicle.images) ? (vehicle.images[0] || "") : (vehicle.image || ""),
+      make: vehicle.brand || "",
+      model: vehicle.model || "",
+      year: vehicle.year || "",
+      mileage_value: String(vehicle.mileage || "").replace(/[^0-9]/g, ""),
+      mileage_unit: "KM",
+      fuel_type: vehicle.fuel || "",
+      transmission: vehicle.transmission || "",
+    });
+  }
+  if (uniqueVehicles.length) {
+    const vehicleFile = path.join(dayDir, "meta-vehicles.csv");
+    await fs.writeFile(vehicleFile, "\uFEFF" + csvFor(uniqueVehicles), "utf8");
+    files.push(vehicleFile);
+  }
+
+  return {
+    products: rows.length,
+    vehicles: uniqueVehicles.length,
+    files,
+    verticals: {
+      vehicles: { status: uniqueVehicles.length ? "feed_ready" : "needs_inventory", count: uniqueVehicles.length, mode: "official_meta_catalog_only" },
+      fashion: { status: process.env.SHOPIFY_MEGAMOLL_ACCESS_TOKEN ? "shopify_connected" : "needs_shopify_credentials", count: 0, mode: "official_meta_catalog_only" },
+      water_drilling: { status: "organic_service_promotion", count: 0, mode: "seo_and_owned_social" }
+    }
+  };
 }
 
 function base64url(value) {
@@ -443,11 +498,20 @@ function reportText(report) {
   for (const worker of report.supervisor.workers || []) lines.push("- " + worker.name + ": " + (worker.conclusion || worker.status) + (worker.needsAttention ? " — ИСКА ПРОВЕРКА" : ""));
   lines.push("", "GOOGLE SEARCH CONSOLE", "Статус: " + report.searchConsole.status);
   for (const site of report.searchConsole.sites || []) lines.push("- " + site.site + ": " + site.notIndexed + " неприети от " + site.inspected.length + " проверени");
+  lines.push("", "СТРАТЕГИЯ ЗА КОНКУРЕНЦИЯТА");
+  for (const item of report.strategy || []) {
+    lines.push("- " + item.name + ": " + item.nextAction);
+    lines.push("  Доказателство: " + item.evidence);
+    lines.push("  Очакван резултат: " + item.expectedResult);
+    lines.push("  Риск: " + item.risk);
+  }
   lines.push("", "СЪДЪРЖАНИЕ И КАНАЛИ");
   lines.push("Подготвени статии: " + report.content.articles);
   lines.push("Подготвени публикации: " + report.content.socialPosts);
   lines.push("Публикувани във Facebook: " + report.content.facebookPublished);
   lines.push("Продукти в каталожните емисии: " + report.catalog.products);
+  lines.push("Автомобили в Meta каталога: " + (report.catalog.vehicles || 0));
+  for (const [name, item] of Object.entries(report.catalog.verticals || {})) lines.push("- " + name + ": " + item.status);
   lines.push("", "ЗАПИТВАНИЯ", "Последни 7 дни: " + report.leads.last7Days, "Последни 30 дни: " + report.leads.last30Days, "Общо: " + report.leads.total);
   lines.push("", "ЗАЩИТИ", "- Без платени реклами", "- Без изтриване на страници или продукти", "- Без нежелани съобщения");
   return lines.join("\r\n") + "\r\n";
@@ -490,6 +554,7 @@ async function main() {
   const commerce = await monitorCommerce(config);
   const googleAds = await monitorGoogleAds(config);
   const supervisor = await superviseWorkers(config);
+  const strategy = buildCompetitiveStrategy(config, audits, commerce);
 
   const leadFile = path.join(root, "work", "leads.jsonl");
   let leadLines = [];
@@ -504,6 +569,7 @@ async function main() {
     googleAds,
     commerce,
     supervisor,
+    strategy,
     content: {
       articles: articles.length,
       socialPosts: plan.filter((item) => item.type === "social").length,

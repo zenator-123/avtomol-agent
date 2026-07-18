@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { analyzeHtml, buildContentPlan, summarizeLeads, trackedUrl } = require("../lib/growth-agent");
+const { analyzeHtml, buildContentPlan, buildCompetitiveStrategy, summarizeLeads, trackedUrl } = require("../lib/growth-agent");
 
 test("SEO проверката открива основните проблеми", () => {
   const result = analyzeHtml("<html><head><title>Кратко</title></head><body><img src='x.jpg'><h1>Тест</h1></body></html>", "https://example.com/");
@@ -33,4 +33,19 @@ test("отчетът брои запитванията по период", () =>
     "невалиден ред",
   ];
   assert.deepEqual(summarizeLeads(lines, now), { last7Days: 1, last30Days: 2, total: 2 });
+});
+
+
+test("създава стратегия за всяко бизнес направление", () => {
+  const strategy = buildCompetitiveStrategy({
+    businessVerticals: [
+      { slug: "vehicles", name: "Автомобили", site: "avtomol" },
+      { slug: "fashion", name: "Дрехи", site: "megamoll" },
+      { slug: "water_drilling", name: "Сондажи", sites: ["posejdon", "waterbg"] },
+    ],
+    competitiveIntelligence: { verticals: { vehicles: ["автомобили"], fashion: ["дрехи"], water_drilling: ["сондажи"] } },
+  }, [], { orders30Days: 3 });
+  assert.equal(strategy.length, 3);
+  assert.equal(strategy[0].opportunity, "автомобили");
+  assert.match(strategy[2].nextAction, /местни страници/);
 });

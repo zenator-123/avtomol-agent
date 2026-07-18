@@ -216,5 +216,80 @@
       "apiVersion": "2026-07",
       "safeSeoFixes": true
     }
-  ]
+  ],
+  "businessVerticals": [
+    {
+      "slug": "vehicles",
+      "name": "Автомобили",
+      "site": "avtomol",
+      "metaCatalog": true,
+      "facebookMarketplace": "official_meta_catalog_only",
+      "updatePricesAndAvailability": true,
+      "deduplicateBy": "external_id",
+      "soldPolicy": "out_of_stock_until_same_brand_replacement"
+    },
+    {
+      "slug": "fashion",
+      "name": "Дрехи и мода",
+      "site": "megamoll",
+      "metaCatalog": true,
+      "facebookMarketplace": "official_meta_catalog_only",
+      "updatePricesAndAvailability": true,
+      "deduplicateBy": "variant_id"
+    },
+    {
+      "slug": "water_drilling",
+      "name": "Сондажи за вода и геофизично проучване",
+      "sites": [
+        "posejdon",
+        "waterbg"
+      ],
+      "metaCatalog": false,
+      "promotion": [
+        "seo_pages",
+        "facebook_posts",
+        "instagram_posts",
+        "google_business"
+      ],
+      "leadGoal": "qualified_inquiry"
+    }
+  ],
+  "competitiveIntelligence": {
+    "enabled": true,
+    "publicDataOnly": true,
+    "neverCopyCompetitorText": true,
+    "daily": true,
+    "sources": [
+      "google_search_console",
+      "public_search_results",
+      "public_competitor_pages",
+      "shopify_sales"
+    ],
+    "verticals": {
+      "vehicles": [
+        "проверени автомобили от Европа",
+        "евтини автомобили от Европа",
+        "автомобили с малък пробег"
+      ],
+      "fashion": [
+        "онлайн магазин за дрехи",
+        "дамска мода",
+        "мъжка мода",
+        "детска мода"
+      ],
+      "water_drilling": [
+        "сондажи за вода",
+        "геофизично проучване",
+        "търсене на вода с георадар"
+      ]
+    },
+    "dailyStrategy": true,
+    "strategyMustInclude": [
+      "възможност",
+      "доказателство",
+      "следващо действие",
+      "очакван резултат",
+      "риск"
+    ]
+  }
 }
