@@ -1,0 +1,63 @@
+name: NIKOLAY daily growth agent
+
+on:
+  schedule:
+    - cron: '30 5 * * *'
+  workflow_dispatch:
+    inputs:
+      publish_owned_channels:
+        description: 'Публикувай в свързаните собствени канали'
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: nikolay-daily-growth-agent
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit-content-and-channels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      GROWTH_PUBLISH_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_owned_channels == true && 'true' || vars.GROWTH_PUBLISH_ENABLED || 'false' }}
+      GROWTH_APPLY_SAFE_FIXES: ${{ vars.GROWTH_APPLY_SAFE_FIXES || 'false' }}
+      SHOPIFY_AVTOMOL_DOMAIN: ${{ secrets.SHOPIFY_AVTOMOL_DOMAIN || secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_AVTOMOL_ACCESS_TOKEN: ${{ secrets.SHOPIFY_AVTOMOL_ACCESS_TOKEN || secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_MEGAMOLL_DOMAIN: ${{ secrets.SHOPIFY_MEGAMOLL_DOMAIN }}
+      SHOPIFY_MEGAMOLL_ACCESS_TOKEN: ${{ secrets.SHOPIFY_MEGAMOLL_ACCESS_TOKEN }}
+      GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+      GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+      GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+      GOOGLE_ADS_REFRESH_TOKEN: ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+      GOOGLE_ADS_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_CUSTOMER_ID }}
+      GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      FACEBOOK_AVTOMOL_PAGE_ID: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_ID }}
+      FACEBOOK_AVTOMOL_PAGE_TOKEN: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_TOKEN }}
+      FACEBOOK_MEGAMOLL_PAGE_ID: ${{ secrets.FACEBOOK_MEGAMOLL_PAGE_ID }}
+      FACEBOOK_MEGAMOLL_PAGE_TOKEN: ${{ secrets.FACEBOOK_MEGAMOLL_PAGE_TOKEN }}
+      FACEBOOK_POSEJDON_PAGE_ID: ${{ secrets.FACEBOOK_POSEJDON_PAGE_ID }}
+      FACEBOOK_POSEJDON_PAGE_TOKEN: ${{ secrets.FACEBOOK_POSEJDON_PAGE_TOKEN }}
+      FACEBOOK_WATER_PAGE_ID: ${{ secrets.FACEBOOK_WATER_PAGE_ID }}
+      FACEBOOK_WATER_PAGE_TOKEN: ${{ secrets.FACEBOOK_WATER_PAGE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run NIKOLAY
+        run: npm run growth:run
+      - name: Upload full daily report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nikolay-daily-report-${{ github.run_number }}
+          path: growth-output/
+          retention-days: 90
+          if-no-files-found: warn

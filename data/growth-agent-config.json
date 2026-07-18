@@ -1,0 +1,220 @@
+{
+  "reportTimezone": "Europe/Sofia",
+  "sites": [
+    {
+      "slug": "avtomol",
+      "name": "AvtoMol.com",
+      "url": "https://avtomol.com/",
+      "enabled": true,
+      "articleSection": "blogs/avtomol",
+      "facebookPageIdEnv": "FACEBOOK_AVTOMOL_PAGE_ID",
+      "facebookTokenEnv": "FACEBOOK_AVTOMOL_PAGE_TOKEN",
+      "topics": [
+        "авточасти по VIN",
+        "гуми според сезона",
+        "масла и филтри",
+        "акумулатори",
+        "проверени автомобили от Европа"
+      ]
+    },
+    {
+      "slug": "megamoll",
+      "name": "MegaMoll.bg",
+      "url": "https://megamoll.bg/",
+      "enabled": true,
+      "articleSection": "blogs/moda",
+      "facebookPageIdEnv": "FACEBOOK_MEGAMOLL_PAGE_ID",
+      "facebookTokenEnv": "FACEBOOK_MEGAMOLL_PAGE_TOKEN",
+      "topics": [
+        "актуални модни предложения",
+        "спортни обувки",
+        "дамска мода",
+        "мъжка мода",
+        "детска мода"
+      ]
+    },
+    {
+      "slug": "posejdon",
+      "name": "Posejdon.bg",
+      "url": "https://posejdon.bg/",
+      "enabled": true,
+      "articleSection": "blog",
+      "facebookPageIdEnv": "FACEBOOK_POSEJDON_PAGE_ID",
+      "facebookTokenEnv": "FACEBOOK_POSEJDON_PAGE_TOKEN",
+      "topics": [
+        "калкулатор за сондаж",
+        "подготовка за воден сондаж",
+        "проучване на терен",
+        "разходи за сондаж",
+        "избор на сондажна техника"
+      ]
+    },
+    {
+      "slug": "waterbg",
+      "name": "WaterBG",
+      "url": "https://waterbg.net/",
+      "enabled": true,
+      "articleSection": "blog",
+      "facebookPageUrl": "https://www.facebook.com/profile.php?id=100065668322469",
+      "facebookPageIdEnv": "FACEBOOK_WATER_PAGE_ID",
+      "facebookTokenEnv": "FACEBOOK_WATER_PAGE_TOKEN",
+      "topics": [
+        "сондажи за вода",
+        "геофизично проучване",
+        "търсене на вода с георадар",
+        "почистване на кладенци",
+        "подземни води"
+      ]
+    }
+  ],
+  "publishing": {
+    "dailyArticles": true,
+    "dailySocialPosts": true,
+    "defaultMode": "preview",
+    "maxArticlesPerSitePerDay": 1,
+    "maxPostsPerPagePerDay": 1
+  },
+  "searchConsole": {
+    "enabled": true,
+    "serviceAccountEnv": "GOOGLE_SERVICE_ACCOUNT_JSON",
+    "inspectDailyLimitPerSite": 100,
+    "repairSafeSeoIssues": true,
+    "applyFixesEnv": "GROWTH_APPLY_SAFE_FIXES",
+    "neverRemovePublishedPages": true
+  },
+  "channels": [
+    {
+      "slug": "facebook",
+      "name": "Facebook",
+      "medium": "organic",
+      "enabled": true
+    },
+    {
+      "slug": "instagram",
+      "name": "Instagram",
+      "medium": "organic",
+      "enabled": true
+    },
+    {
+      "slug": "google",
+      "name": "Google Free Listings",
+      "medium": "free_listing",
+      "enabled": true
+    },
+    {
+      "slug": "tiktok",
+      "name": "TikTok",
+      "medium": "organic",
+      "enabled": true
+    },
+    {
+      "slug": "viber",
+      "name": "Viber",
+      "medium": "organic",
+      "enabled": true
+    }
+  ],
+  "markets": [
+    "BG",
+    "RO",
+    "GR",
+    "DE",
+    "FR",
+    "IT",
+    "ES",
+    "NL",
+    "BE",
+    "AT"
+  ],
+  "safety": {
+    "allowPaidAds": false,
+    "allowDelete": false,
+    "allowUnsolicitedMessages": false,
+    "publishOnlyOwnedChannels": true
+  },
+  "reporting": {
+    "dailyDesktopReport": true,
+    "desktopDirectory": "D:/Desktop/AI-АГЕНТ-ОТЧЕТ",
+    "keepDays": 90
+  },
+  "agentName": "НИКОЛАЙ",
+  "supervisor": {
+    "repository": "zenator-123/avtomol-agent",
+    "githubTokenEnv": "GITHUB_TOKEN",
+    "autoRetryEnv": "NIKOLAY_AUTO_RETRY",
+    "maxRetriesPerRun": 1,
+    "workers": [
+      {
+        "name": "AvtoMol синхронизация",
+        "workflow": "daily-vehicle-sync.yml",
+        "critical": true,
+        "autoRetry": false
+      },
+      {
+        "name": "Цени според пазара",
+        "workflow": "market-price-sync.yml",
+        "critical": true,
+        "autoRetry": false
+      },
+      {
+        "name": "OLX цени и позиции",
+        "workflow": "olx-update-prices.yml",
+        "critical": true,
+        "autoRetry": false
+      },
+      {
+        "name": "Защитени автомобили",
+        "workflow": "protected-vehicle-sync.yml",
+        "critical": true,
+        "autoRetry": false
+      },
+      {
+        "name": "OLX отчет",
+        "workflow": "olx-export-adverts.yml",
+        "critical": false,
+        "autoRetry": true
+      },
+      {
+        "name": "НИКОЛАЙ реклама и SEO",
+        "workflow": "nikolay-growth-agent.yml",
+        "critical": true,
+        "autoRetry": false
+      }
+    ]
+  },
+  "googleAds": {
+    "enabled": true,
+    "apiVersion": "v21",
+    "developerTokenEnv": "GOOGLE_ADS_DEVELOPER_TOKEN",
+    "clientIdEnv": "GOOGLE_ADS_CLIENT_ID",
+    "clientSecretEnv": "GOOGLE_ADS_CLIENT_SECRET",
+    "refreshTokenEnv": "GOOGLE_ADS_REFRESH_TOKEN",
+    "customerIdEnv": "GOOGLE_ADS_CUSTOMER_ID",
+    "loginCustomerIdEnv": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+    "monitorSpend": true,
+    "monitorConversions": true,
+    "monitorDisapprovals": true,
+    "allowMutations": false,
+    "requireDailyBudgetApproval": true
+  },
+  "commerceStores": [
+    {
+      "site": "avtomol",
+      "name": "AvtoMol.com",
+      "platform": "shopify",
+      "domainEnv": "SHOPIFY_AVTOMOL_DOMAIN",
+      "tokenEnv": "SHOPIFY_AVTOMOL_ACCESS_TOKEN",
+      "apiVersion": "2026-07",
+      "safeSeoFixes": true
+    },
+    {
+      "site": "megamoll",
+      "name": "MegaMoll.bg",
+      "platform": "shopify",
+      "domainEnv": "SHOPIFY_MEGAMOLL_DOMAIN",
+      "tokenEnv": "SHOPIFY_MEGAMOLL_ACCESS_TOKEN",
+      "apiVersion": "2026-07",
+      "safeSeoFixes": true
+    }
+  ]
+}
