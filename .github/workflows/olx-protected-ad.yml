@@ -1,0 +1,25 @@
+name: OLX activate protected advert
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: olx-protected-ad-148564438
+  cancel-in-progress: false
+
+jobs:
+  activate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Activate and verify protected OLX advert
+        run: node scripts/olx-protected-ad.js
