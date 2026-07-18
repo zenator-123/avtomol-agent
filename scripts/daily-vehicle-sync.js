@@ -6,6 +6,8 @@ const MAX_DELETIONS = Number(process.env.MAX_DELETIONS_PER_RUN || 20);
 const MIN_INVENTORY = Number(process.env.MIN_INVENTORY_COUNT || 10);
 const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCase() === 'true';
 const ALLOW_ADDITIONS = String(process.env.ALLOW_ADDITIONS || 'false').toLowerCase() === 'true';
+const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
+const REPORT_PATH = process.env.VEHICLE_SYNC_REPORT_PATH || 'daily-vehicle-sync-report.json';
 
 function pick(object, names) {
   for (const name of names) {
@@ -269,7 +271,19 @@ async function deleteFacebookPost(postId) {
   await facebookRequest(postId, { method: 'DELETE' });
 }
 
+async function facebookOrFallback(label, operation, fallback, failures) {
+  try {
+    return await operation();
+  } catch (error) {
+    failures.push({ operation: label, error: error.message });
+    console.warn(`::warning::Facebook ${label} skipped: ${error.message}`);
+    if (FACEBOOK_STRICT) throw error;
+    return fallback;
+  }
+}
+
 async function main() {
+  const report = { startedAt: new Date().toISOString(), dryRun: DRY_RUN, facebookDegraded: false, facebookFailures: [] };
   const inventory = await loadInventory();
   const available = new Map(inventory.filter((vehicle) => vehicle.available).map((vehicle) => [vehicle.incomingNumber, vehicle]));
   const products = await listManagedProducts([...available.values()]);
@@ -277,14 +291,14 @@ async function main() {
   const sold = products.filter((product) => !available.has(product.incomingNumber));
   const additions = [...available.values()].filter((vehicle) => !existing.has(vehicle.incomingNumber));
   const updates = [...available.values()].filter((vehicle) => existing.has(vehicle.incomingNumber));
-  const facebookPosts = await listFacebookPostsByIncomingNumber();
+  const facebookPosts = await facebookOrFallback('list posts', listFacebookPostsByIncomingNumber, new Map(), report.facebookFailures);
   if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
   console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
   if (ALLOW_DELETIONS) {
     for (const product of sold) {
       console.log(`${DRY_RUN ? 'WOULD DELETE' : 'DELETE'} ${product.incomingNumber} ${product.title}`);
-      await deleteFacebookPost(product.facebookPostId);
+      await facebookOrFallback(`delete ${product.incomingNumber}`, () => deleteFacebookPost(product.facebookPostId), undefined, report.facebookFailures);
       await deleteShopifyProduct(product);
     }
   } else if (sold.length) {
@@ -294,7 +308,7 @@ async function main() {
     const product = existing.get(vehicle.incomingNumber);
     const priceChanged = await updateShopifyProductPrice(product, vehicle);
     const postId = product.facebookPostId || facebookPosts.get(vehicle.incomingNumber) || '';
-    const facebookChanged = await updateFacebookPost(postId, vehicle);
+    const facebookChanged = await facebookOrFallback(`update ${vehicle.incomingNumber}`, () => updateFacebookPost(postId, vehicle), false, report.facebookFailures);
     if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
     console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
   }
@@ -302,13 +316,27 @@ async function main() {
     for (const vehicle of additions) {
       console.log(`${DRY_RUN ? 'WOULD ADD' : 'ADD'} ${vehicle.incomingNumber} ${vehicle.title}`);
       const product = await createShopifyProduct(vehicle);
-      const postId = await publishFacebookPost(vehicle, product.handle);
+      const postId = await facebookOrFallback(`publish ${vehicle.incomingNumber}`, () => publishFacebookPost(vehicle, product.handle), '', report.facebookFailures);
       await saveFacebookPostId(product.id, postId);
     }
   } else if (additions.length) {
     console.log(`SKIP ${additions.length} additions because ALLOW_ADDITIONS is false`);
   }
+  Object.assign(report, {
+    finishedAt: new Date().toISOString(),
+    inventory: inventory.length,
+    existing: products.length,
+    sold: sold.length,
+    additions: additions.length,
+    updates: updates.length,
+    facebookDegraded: report.facebookFailures.length > 0,
+  });
+  await fs.writeFile(REPORT_PATH, JSON.stringify(report, null, 2) + '\n', 'utf8');
 }
 
-if (require.main === module) main().catch((error) => { console.error(error.message); process.exitCode = 1; });
-module.exports = { normalizeVehicle, vehicleDescription };
+if (require.main === module) main().catch(async (error) => {
+  console.error(error.stack || error.message);
+  try { await fs.writeFile(REPORT_PATH, JSON.stringify({ startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), fatal: error.message }, null, 2) + '\n', 'utf8'); } catch {}
+  process.exitCode = 1;
+});
+module.exports = { normalizeVehicle, vehicleDescription, facebookOrFallback };

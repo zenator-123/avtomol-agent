@@ -1,7 +1,7 @@
-﻿const test = require('node:test');
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const data = require('../data/market-price-updates-800.json');
-const { stockFromText, replaceEurPrice, buildVehiclePlans, matchPlanForProduct } = require('../scripts/update-market-prices');
+const { stockFromText, replaceEurPrice, buildVehiclePlans, matchPlanForProduct, isFacebookAuthError } = require('../scripts/update-market-prices');
 
 test('validates exactly 800 unique advert reductions', () => {
   const built = buildVehiclePlans(data);
@@ -23,4 +23,10 @@ test('matches Shopify products by external handle or stock number', () => {
   const byExternal = new Map([[plan.externalId, plan]]);
   assert.equal(matchPlanForProduct({ handle: 'avtomol-cx64402' }, byStock, byExternal), plan);
   assert.equal(matchPlanForProduct({ handle: 'other', title: 'Vehicle CX64402' }, byStock, byExternal), plan);
+});
+
+
+test('recognizes expired Facebook authentication', () => {
+  assert.equal(isFacebookAuthError(new Error('Error validating access token: Session has expired')), true);
+  assert.equal(isFacebookAuthError(new Error('HTTP 500')), false);
 });

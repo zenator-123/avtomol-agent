@@ -1,4 +1,4 @@
-﻿const fs = require('node:fs/promises');
+const fs = require('node:fs/promises');
 
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const FB_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v25.0';
@@ -157,6 +157,10 @@ function facebookUrl(pathname, token) {
   return url;
 }
 
+function isFacebookAuthError(error) {
+  return /access token|session has expired|oauth|error validating access token/i.test(String(error?.message || error || ''));
+}
+
 async function listFacebookPosts() {
   const token = required('FACEBOOK_PAGE_ACCESS_TOKEN');
   const me = await facebookJson(facebookUrl('me?fields=id,name', token));
@@ -200,7 +204,7 @@ async function main() {
     uniqueVehiclePlans: built.vehicles.length,
     selectedVehiclePlans: vehicles.length,
     shopify: { enabled: CHANNEL === 'all' || CHANNEL === 'shopify', productsRead: 0, matchedProducts: 0, updatedPrices: 0, updatedDescriptions: 0, missingStocks: [], failures: [] },
-    facebook: { enabled: CHANNEL === 'all' || CHANNEL === 'facebook', page: null, postsRead: 0, matchedPosts: 0, updatedPosts: 0, missingStocks: [], failures: [] },
+    facebook: { enabled: CHANNEL === 'all' || CHANNEL === 'facebook', degraded: false, page: null, postsRead: 0, matchedPosts: 0, updatedPosts: 0, missingStocks: [], failures: [] },
   };
 
   if (report.shopify.enabled) {
@@ -225,39 +229,44 @@ async function main() {
   }
 
   if (report.facebook.enabled) {
-    const result = await listFacebookPosts();
-    report.facebook.page = result.page;
-    report.facebook.postsRead = result.posts.length;
-    const postsByStock = new Map();
-    for (const post of result.posts) {
-      const stock = stockFromText(post.message);
-      if (!stock || !byStock.has(stock)) continue;
-      if (!postsByStock.has(stock)) postsByStock.set(stock, []);
-      postsByStock.get(stock).push(post);
-    }
-    for (const plan of vehicles) {
-      const posts = postsByStock.get(plan.stock) || [];
-      if (!posts.length) {
-        report.facebook.missingStocks.push(plan.stock);
-        continue;
+    try {
+      const result = await listFacebookPosts();
+      report.facebook.page = result.page;
+      report.facebook.postsRead = result.posts.length;
+      const postsByStock = new Map();
+      for (const post of result.posts) {
+        const stock = stockFromText(post.message);
+        if (!stock || !byStock.has(stock)) continue;
+        if (!postsByStock.has(stock)) postsByStock.set(stock, []);
+        postsByStock.get(stock).push(post);
       }
-      for (const post of posts) {
-        report.facebook.matchedPosts += 1;
-        try {
-          const update = await updateFacebookPost(post, plan);
-          if (update.changed) report.facebook.updatedPosts += 1;
-          console.log((APPLY ? 'FACEBOOK UPDATE ' : 'FACEBOOK CHECK ') + plan.stock + ' ' + post.id);
-        } catch (error) {
-          report.facebook.failures.push({ stock: plan.stock, postId: post.id, error: error.message });
+      for (const plan of vehicles) {
+        const posts = postsByStock.get(plan.stock) || [];
+        if (!posts.length) {
+          report.facebook.missingStocks.push(plan.stock);
+          continue;
+        }
+        for (const post of posts) {
+          report.facebook.matchedPosts += 1;
+          try {
+            const update = await updateFacebookPost(post, plan);
+            if (update.changed) report.facebook.updatedPosts += 1;
+            console.log((APPLY ? 'FACEBOOK UPDATE ' : 'FACEBOOK CHECK ') + plan.stock + ' ' + post.id);
+          } catch (error) {
+            report.facebook.failures.push({ stock: plan.stock, postId: post.id, error: error.message });
+          }
         }
       }
+    } catch (error) {
+      report.facebook.degraded = true;
+      report.facebook.failures.push({ stage: 'authentication-or-list', error: error.message, authentication: isFacebookAuthError(error) });
+      console.warn('::warning::Facebook sync skipped: ' + error.message);
     }
   }
-
   report.finishedAt = new Date().toISOString();
   await fs.writeFile(REPORT_PATH, JSON.stringify(report, null, 2) + '\n', 'utf8');
   console.log(JSON.stringify(report, null, 2));
-  if (report.shopify.failures.length || report.facebook.failures.length) process.exitCode = 1;
+  if (report.shopify.failures.length || (CHANNEL === 'facebook' && report.facebook.failures.length)) process.exitCode = 1;
 }
 
 if (require.main === module) main().catch(async (error) => {
@@ -266,4 +275,4 @@ if (require.main === module) main().catch(async (error) => {
   process.exitCode = 1;
 });
 
-module.exports = { stockFromText, replaceEurPrice, buildVehiclePlans, matchPlanForProduct };
+module.exports = { stockFromText, replaceEurPrice, buildVehiclePlans, matchPlanForProduct, isFacebookAuthError };

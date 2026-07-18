@@ -35,6 +35,8 @@ jobs:
       MIN_INVENTORY_COUNT: ${{ vars.MIN_INVENTORY_COUNT || '10' }}
       ALLOW_DELETIONS: 'false'
       ALLOW_ADDITIONS: 'false'
+      FACEBOOK_STRICT: 'false'
+      VEHICLE_SYNC_REPORT_PATH: daily-vehicle-sync-report.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,3 +45,11 @@ jobs:
       - run: npm install --ignore-scripts --no-package-lock
       - name: Synchronize Avtomol.com and Facebook
         run: npm run sync:vehicles
+      - name: Upload synchronization report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-vehicle-sync-report
+          path: daily-vehicle-sync-report.json
+          retention-days: 14
+          if-no-files-found: warn
