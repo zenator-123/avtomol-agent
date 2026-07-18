@@ -5,6 +5,7 @@ const FB_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v25.0';
 const APPLY = String(process.env.APPLY_PRICE_CHANGES || 'false').toLowerCase() === 'true';
 const LIMIT = Math.max(0, Number(process.env.PRICE_SYNC_LIMIT || 0));
 const CHANNEL = String(process.env.PRICE_SYNC_CHANNEL || 'all').toLowerCase();
+const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
 const REPORT_PATH = process.env.PRICE_SYNC_REPORT_PATH || 'price-sync-report.json';
 
 function required(name) {
@@ -266,7 +267,7 @@ async function main() {
   report.finishedAt = new Date().toISOString();
   await fs.writeFile(REPORT_PATH, JSON.stringify(report, null, 2) + '\n', 'utf8');
   console.log(JSON.stringify(report, null, 2));
-  if (report.shopify.failures.length || (CHANNEL === 'facebook' && report.facebook.failures.length)) process.exitCode = 1;
+  if (report.shopify.failures.length || (FACEBOOK_STRICT && report.facebook.failures.length)) process.exitCode = 1;
 }
 
 if (require.main === module) main().catch(async (error) => {

@@ -1,4 +1,4 @@
-﻿name: Avtomol market price sync
+name: Avtomol market price sync
 
 on:
   push:
@@ -47,6 +47,7 @@ jobs:
       SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
       SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
       FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      FACEBOOK_STRICT: ${{ github.event_name == 'workflow_dispatch' && 'true' || 'false' }}
       EVENT_NAME: ${{ github.event_name }}
       INPUT_APPLY: ${{ inputs.apply_changes }}
       INPUT_CHANNEL: ${{ inputs.channel }}
