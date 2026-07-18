@@ -47,15 +47,15 @@ jobs:
       FACEBOOK_WATER_PAGE_ID: ${{ secrets.FACEBOOK_WATER_PAGE_ID }}
       FACEBOOK_WATER_PAGE_TOKEN: ${{ secrets.FACEBOOK_WATER_PAGE_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - name: Run NIKOLAY
         run: npm run growth:run
       - name: Upload full daily report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: nikolay-daily-report-${{ github.run_number }}
           path: growth-output/
