@@ -39,15 +39,33 @@ async function olxRequest(path, options = {}, allowRefresh = true) {
 }
 
 async function main() {
-  const before = (await olxRequest(`/adverts/${PROTECTED_AD_ID}`))?.data;
-  if (!before || before.id !== PROTECTED_AD_ID) throw new Error('Protected advert was not found in this OLX account.');
-  if (before.status !== 'active') await olxRequest(`/adverts/${PROTECTED_AD_ID}/commands`, { method: 'POST', body: JSON.stringify({ command: 'activate' }) });
-  await new Promise(resolve => setTimeout(resolve, 4000));
-  const after = (await olxRequest(`/adverts/${PROTECTED_AD_ID}`))?.data;
-  console.log(JSON.stringify({ id: PROTECTED_AD_ID, title: after?.title, before: before.status, after: after?.status }));
-  if (after?.status !== 'active') throw new Error(`Protected advert is not active after activation: ${after?.status || 'unknown'}`);
-}
+  const pendingStatuses = new Set(['new', 'unconfirmed']);
+  const terminalFailureStatuses = new Set(['unpaid', 'limited', 'moderated', 'blocked', 'disabled', 'removed_by_moderator', 'removed_by_user']);
+  let advert = (await olxRequest('/adverts/' + PROTECTED_AD_ID))?.data;
+  if (!advert || advert.id !== PROTECTED_AD_ID) throw new Error('Protected advert was not found in this OLX account.');
+  const beforeStatus = advert.status;
 
+  if (advert.status !== 'active' && !pendingStatuses.has(advert.status)) {
+    await olxRequest('/adverts/' + PROTECTED_AD_ID + '/commands', {
+      method: 'POST',
+      body: JSON.stringify({ command: 'activate' }),
+    });
+  }
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    advert = (await olxRequest('/adverts/' + PROTECTED_AD_ID))?.data;
+    if (advert?.status === 'active') {
+      console.log(JSON.stringify({ id: PROTECTED_AD_ID, title: advert.title, before: beforeStatus, after: advert.status }));
+      return;
+    }
+    if (terminalFailureStatuses.has(advert?.status)) throw new Error('Protected advert activation stopped with status: ' + advert.status);
+    if (!pendingStatuses.has(advert?.status)) throw new Error('Unexpected protected advert status: ' + (advert?.status || 'unknown'));
+  }
+
+  console.log('::notice title=OLX protected advert pending::Advert 148564438 was accepted and is still being processed by OLX.');
+  console.log(JSON.stringify({ id: PROTECTED_AD_ID, title: advert?.title, before: beforeStatus, after: advert?.status, pending: true }));
+}
 main().catch(error => {
   console.error(error.message);
   console.error('::error title=OLX protected advert activation::' + String(error.message));
