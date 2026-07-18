@@ -40,7 +40,6 @@ async function main() {
 
 main().catch(error => {
   console.error(error.message);
-  console.error('::error title=OLX protected advert activation::' + String(error.message).replace(/%/g, '%25').replace(//g, '%0D').replace(/
-/g, '%0A'));
+  console.error('::error title=OLX protected advert activation::' + String(error.message));
   process.exitCode = 1;
 });
