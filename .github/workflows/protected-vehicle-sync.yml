@@ -1,0 +1,37 @@
+name: Publish protected Citroen to AvtoMol and Facebook
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protected-citroen-148564438
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+      SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      FACEBOOK_STRICT: 'false'
+      SYNC_DRY_RUN: 'false'
+      SYNC_ALLOW_ADDITIONS: 'true'
+      SYNC_ALLOW_DELETIONS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publish or update protected Citroen
+        run: node scripts/protected-vehicle-sync.js

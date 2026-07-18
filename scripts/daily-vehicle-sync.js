@@ -339,4 +339,4 @@ if (require.main === module) main().catch(async (error) => {
   try { await fs.writeFile(REPORT_PATH, JSON.stringify({ startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), fatal: error.message }, null, 2) + '\n', 'utf8'); } catch {}
   process.exitCode = 1;
 });
-module.exports = { normalizeVehicle, vehicleDescription, facebookOrFallback };
+module.exports = { normalizeVehicle, vehicleDescription, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
