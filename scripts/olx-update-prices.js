@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { getOlxAccessToken } = require('./olx-auth');
 
 function required(name) {
   const value = process.env[name];
@@ -65,7 +66,7 @@ function fullUpdatePayload(advert, update) {
 }
 
 async function main() {
-  const token = required('OLX_ACCESS_TOKEN');
+  const token = await getOlxAccessToken();
   const scope = process.env.UPDATE_SCOPE || 'dry-run';
   if (!['dry-run', 'pilot', 'batch'].includes(scope)) throw new Error(`Invalid UPDATE_SCOPE: ${scope}`);
   const planPath = path.join(process.cwd(), 'data', 'olx-price-updates-2026-07-17.json');

@@ -30,6 +30,9 @@ jobs:
     timeout-minutes: 45
     env:
       OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       UPDATE_SCOPE: ${{ inputs.scope }}
       BATCH_LIMIT: ${{ inputs.batch_limit }}
     steps:

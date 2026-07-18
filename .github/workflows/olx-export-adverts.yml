@@ -12,6 +12,9 @@ jobs:
     timeout-minutes: 15
     env:
       OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
     steps:
       - uses: actions/checkout@v4

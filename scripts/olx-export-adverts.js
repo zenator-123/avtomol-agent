@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { getOlxAccessToken } = require('./olx-auth');
 
 function required(name) {
   const value = process.env[name];
@@ -8,7 +9,7 @@ function required(name) {
 }
 
 async function main() {
-  const token = required('OLX_ACCESS_TOKEN');
+  const token = await getOlxAccessToken();
   const adverts = [];
   const limit = 100;
 
