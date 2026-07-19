@@ -5,6 +5,7 @@ const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const DRY_RUN = String(process.env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false';
 const MAX_DELETIONS = Number(process.env.MAX_DELETIONS_PER_RUN || 20);
 const MIN_INVENTORY = Number(process.env.MIN_INVENTORY_COUNT || 10);
+const REQUIRED_AUTO1_CATALOG_SIZE = Number(process.env.AUTO1_REQUIRED_CATALOG_SIZE || 25000);
 const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCase() === 'true';
 const ALLOW_ADDITIONS = String(process.env.ALLOW_ADDITIONS || 'false').toLowerCase() === 'true';
 const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
@@ -288,9 +289,12 @@ async function main() {
   const report = { startedAt: new Date().toISOString(), dryRun: DRY_RUN, facebookDegraded: false, facebookFailures: [] };
   const inventory = await loadInventory();
   const catalogSource = process.env.INVENTORY_FEED_URL ? 'AUTO1_FEED' : 'LOCAL_TEST_SAMPLE';
-  const knowledge = learnVehicles(inventory, new Date().toISOString(), { catalogSource, expectedCatalogSize: 25000 });
+  const knowledge = learnVehicles(inventory, new Date().toISOString(), { catalogSource, expectedCatalogSize: REQUIRED_AUTO1_CATALOG_SIZE });
   if (!knowledge.completeAuto1Catalog) {
-    console.warn(`::warning::Vehicle learning is partial: ${inventory.length} of at least 25000 expected AUTO1 vehicles (${catalogSource}).`);
+    console.warn(`::warning::Vehicle learning is partial: ${inventory.length} of at least ${REQUIRED_AUTO1_CATALOG_SIZE} expected AUTO1 vehicles (${catalogSource}).`);
+  }
+  if (!DRY_RUN && (catalogSource !== 'AUTO1_FEED' || !knowledge.completeAuto1Catalog)) {
+    throw new Error(`Safety stop: real synchronization requires a verified AUTO1 feed with at least ${REQUIRED_AUTO1_CATALOG_SIZE} unique vehicles; received ${inventory.length} from ${catalogSource}.`);
   }
   await fs.writeFile(KNOWLEDGE_PATH, JSON.stringify(knowledge, null, 2) + '\n', 'utf8');
   report.learning = knowledge.totals;
