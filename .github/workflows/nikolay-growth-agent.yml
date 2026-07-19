@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 45
     env:
       GITHUB_TOKEN: ${{ github.token }}
-      GROWTH_PUBLISH_ENABLED: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_owned_channels == true && 'true' || vars.GROWTH_PUBLISH_ENABLED || 'false' }}
+      GROWTH_PUBLISH_ENABLED: ${{ github.event_name == 'schedule' && 'true' || github.event_name == 'workflow_dispatch' && inputs.publish_owned_channels == true && 'true' || vars.GROWTH_PUBLISH_ENABLED || 'false' }}
       GROWTH_APPLY_SAFE_FIXES: ${{ vars.GROWTH_APPLY_SAFE_FIXES || 'false' }}
       SHOPIFY_AVTOMOL_DOMAIN: ${{ secrets.SHOPIFY_AVTOMOL_DOMAIN || secrets.SHOPIFY_SHOP_DOMAIN }}
       SHOPIFY_AVTOMOL_ACCESS_TOKEN: ${{ secrets.SHOPIFY_AVTOMOL_ACCESS_TOKEN || secrets.SHOPIFY_ACCESS_TOKEN }}
@@ -38,8 +38,8 @@ jobs:
       GOOGLE_ADS_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_CUSTOMER_ID }}
       GOOGLE_ADS_LOGIN_CUSTOMER_ID: ${{ secrets.GOOGLE_ADS_LOGIN_CUSTOMER_ID }}
       GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-      FACEBOOK_AVTOMOL_PAGE_ID: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_ID }}
-      FACEBOOK_AVTOMOL_PAGE_TOKEN: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_TOKEN }}
+      FACEBOOK_AVTOMOL_PAGE_ID: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_ID || secrets.FACEBOOK_PAGE_ID }}
+      FACEBOOK_AVTOMOL_PAGE_TOKEN: ${{ secrets.FACEBOOK_AVTOMOL_PAGE_TOKEN || secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
       FACEBOOK_MEGAMOLL_PAGE_ID: ${{ secrets.FACEBOOK_MEGAMOLL_PAGE_ID }}
       FACEBOOK_MEGAMOLL_PAGE_TOKEN: ${{ secrets.FACEBOOK_MEGAMOLL_PAGE_TOKEN }}
       FACEBOOK_POSEJDON_PAGE_ID: ${{ secrets.FACEBOOK_POSEJDON_PAGE_ID }}
