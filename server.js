@@ -185,6 +185,11 @@ async function saveLead({ contact, message, pageContext, sessionId }) {
 async function getProfile() {
   if (!profileCache) {
     profileCache = await readJson(path.join(dataDir, "store-profile.json"));
+    try {
+      profileCache.vehicleKnowledge = await readJson(path.join(dataDir, "vehicle-knowledge.json"));
+    } catch {
+      profileCache.vehicleKnowledge = null;
+    }
   }
 
   return profileCache;

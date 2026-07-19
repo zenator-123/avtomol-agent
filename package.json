@@ -6,6 +6,7 @@
   "scripts": {
     "import:catalog": "node scripts/import-avtomol-catalog.js",
     "sync:vehicles": "node scripts/daily-vehicle-sync.js",
+    "learn:vehicles": "node scripts/learn-vehicles.js",
     "start": "node server.js",
     "test": "node --test",
     "growth:run": "node scripts/growth-agent.js"

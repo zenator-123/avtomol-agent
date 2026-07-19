@@ -38,6 +38,7 @@ jobs:
       ALLOW_ADDITIONS: 'false'
       FACEBOOK_STRICT: 'false'
       VEHICLE_SYNC_REPORT_PATH: daily-vehicle-sync-report.json
+      VEHICLE_KNOWLEDGE_PATH: vehicle-knowledge.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,6 +52,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: daily-vehicle-sync-report
-          path: daily-vehicle-sync-report.json
+          path: |
+            daily-vehicle-sync-report.json
+            vehicle-knowledge.json
           retention-days: 14
           if-no-files-found: warn
