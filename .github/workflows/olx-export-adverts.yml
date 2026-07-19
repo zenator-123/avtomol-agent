@@ -17,8 +17,8 @@ jobs:
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Export current OLX adverts
@@ -26,7 +26,7 @@ jobs:
       - name: Build non-sensitive advert index
         run: node scripts/olx-export-advert-index.js
       - name: Upload advert index
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: olx-advert-index
           path: ${{ runner.temp }}/olx-advert-index.json
@@ -35,7 +35,7 @@ jobs:
       - name: Encrypt export
         run: openssl enc -aes-256-cbc -salt -pbkdf2 -in "$RUNNER_TEMP/olx-adverts.json" -out olx-adverts.enc -pass env:OLX_TOKEN_TRANSFER_KEY
       - name: Upload encrypted export
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: olx-adverts-encrypted
           path: olx-adverts.enc
