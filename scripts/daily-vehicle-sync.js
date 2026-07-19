@@ -1,4 +1,5 @@
 const fs = require('node:fs/promises');
+const { learnVehicles } = require('../lib/vehicle-learning');
 
 const API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const DRY_RUN = String(process.env.SYNC_DRY_RUN ?? 'true').toLowerCase() !== 'false';
@@ -8,6 +9,7 @@ const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCa
 const ALLOW_ADDITIONS = String(process.env.ALLOW_ADDITIONS || 'false').toLowerCase() === 'true';
 const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
 const REPORT_PATH = process.env.VEHICLE_SYNC_REPORT_PATH || 'daily-vehicle-sync-report.json';
+const KNOWLEDGE_PATH = process.env.VEHICLE_KNOWLEDGE_PATH || 'vehicle-knowledge.json';
 
 function pick(object, names) {
   for (const name of names) {
@@ -285,6 +287,13 @@ async function facebookOrFallback(label, operation, fallback, failures) {
 async function main() {
   const report = { startedAt: new Date().toISOString(), dryRun: DRY_RUN, facebookDegraded: false, facebookFailures: [] };
   const inventory = await loadInventory();
+  const catalogSource = process.env.INVENTORY_FEED_URL ? 'AUTO1_FEED' : 'LOCAL_TEST_SAMPLE';
+  const knowledge = learnVehicles(inventory, new Date().toISOString(), { catalogSource, expectedCatalogSize: 25000 });
+  if (!knowledge.completeAuto1Catalog) {
+    console.warn(`::warning::Vehicle learning is partial: ${inventory.length} of at least 25000 expected AUTO1 vehicles (${catalogSource}).`);
+  }
+  await fs.writeFile(KNOWLEDGE_PATH, JSON.stringify(knowledge, null, 2) + '\n', 'utf8');
+  report.learning = knowledge.totals;
   const available = new Map(inventory.filter((vehicle) => vehicle.available).map((vehicle) => [vehicle.incomingNumber, vehicle]));
   const products = await listManagedProducts([...available.values()]);
   const existing = new Map(products.map((product) => [product.incomingNumber, product]));
