@@ -275,8 +275,23 @@ async function inspectSearchConsole(config, audits) {
 
 async function shopifyGraphql(store, query, variables = {}) {
   const domain = String(process.env[store.domainEnv] || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
-  const token = process.env[store.tokenEnv];
-  if (!domain || !token) return { missingCredentials: true };
+  let token = process.env[store.tokenEnv];
+  if (!domain) return { missingCredentials: true };
+  if (!token) {
+    const clientId = process.env[store.clientIdEnv || ""];
+    const clientSecret = process.env[store.clientSecretEnv || ""];
+    if (!clientId || !clientSecret) return { missingCredentials: true };
+    const oauth = await fetch("https://" + domain + "/admin/oauth/access_token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: "client_credentials" }),
+    });
+    const credentials = await oauth.json().catch(() => ({}));
+    if (!oauth.ok || !credentials.access_token) {
+      throw new Error("Shopify " + store.name + " authentication failed: " + (credentials.error_description || credentials.error || "HTTP " + oauth.status));
+    }
+    token = credentials.access_token;
+  }
   const response = await fetch("https://" + domain + "/admin/api/" + (store.apiVersion || "2026-07") + "/graphql.json", {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Shopify-Access-Token": token },
@@ -293,8 +308,8 @@ async function monitorCommerce(config) {
     "query NIKOLAYCommerce($ordersQuery: String!) {",
     "orders(first: 100, query: $ordersQuery, sortKey: CREATED_AT, reverse: true) {",
     "nodes { id createdAt currentTotalPriceSet { shopMoney { amount currencyCode } } } }",
-    "products(first: 100, query: \"status:active\") {",
-    "nodes { id title description seo { title description } } }",
+    "products(first: 100, query: \"status:active\", sortKey: UPDATED_AT, reverse: true) {",
+    "nodes { id title handle description seo { title description } featuredMedia { preview { image { url altText } } } variants(first: 10) { nodes { price availableForSale } } } }",
     "}",
   ].join(" ");
   const seoMutation = [
@@ -316,6 +331,19 @@ async function monitorCommerce(config) {
       const currency = orders[0]?.currentTotalPriceSet?.shopMoney?.currencyCode || "EUR";
       const revenue30Days = orders.reduce((sum, order) => sum + Number(order.currentTotalPriceSet?.shopMoney?.amount || 0), 0);
       const missingSeo = products.filter((product) => !product.seo?.title || !product.seo?.description);
+      const availableProducts = products.filter((product) => product.variants?.nodes?.some((variant) => variant.availableForSale));
+      const rotationIndex = availableProducts.length ? Math.floor(Date.now() / 86400000) % availableProducts.length : -1;
+      const featured = rotationIndex >= 0 ? availableProducts[rotationIndex] : null;
+      const featuredVariant = featured?.variants?.nodes?.find((variant) => variant.availableForSale);
+      const domain = String(process.env[store.domainEnv] || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const featuredProduct = featured ? {
+        id: featured.id,
+        title: featured.title,
+        price: featuredVariant?.price || "",
+        currency,
+        url: "https://" + domain + "/products/" + featured.handle,
+        imageUrl: featured.featuredMedia?.preview?.image?.url || "",
+      } : null;
       const fixes = [];
       const apply = String(process.env.GROWTH_APPLY_SAFE_FIXES || "").toLowerCase() === "true";
       if (apply && store.safeSeoFixes) {
@@ -338,6 +366,7 @@ async function monitorCommerce(config) {
         currency,
         activeProductsChecked: products.length,
         productsMissingSeo: missingSeo.length,
+        featuredProduct,
         fixes,
       });
     } catch (error) {
@@ -468,9 +497,14 @@ async function publishFacebook(site, post) {
   const pageId = process.env[site.facebookPageIdEnv || ""];
   const token = process.env[site.facebookTokenEnv || ""];
   if (!pageId || !token) return { status: "needs_credentials" };
-  const response = await fetch("https://graph.facebook.com/v25.0/" + encodeURIComponent(pageId) + "/feed", {
+  const hasImage = Boolean(post.imageUrl);
+  const endpoint = hasImage ? "/photos" : "/feed";
+  const body = hasImage
+    ? new URLSearchParams({ url: post.imageUrl, caption: post.text, access_token: token })
+    : new URLSearchParams({ message: post.text, link: post.trackedUrl, access_token: token });
+  const response = await fetch("https://graph.facebook.com/v25.0/" + encodeURIComponent(pageId) + endpoint, {
     method: "POST",
-    body: new URLSearchParams({ message: post.text, link: post.trackedUrl, access_token: token }),
+    body,
   });
   const data = await response.json();
   if (!response.ok) return { status: "failed", error: data.error?.message || "HTTP " + response.status };
@@ -539,6 +573,24 @@ async function main() {
     await fs.writeFile(path.join(articleDir, safeName(item.site + "-" + item.topic) + ".md"), articleBody(site, item.topic), "utf8");
   }
 
+  const commerce = await monitorCommerce(config);
+  const megamoll = commerce.stores.find((store) => store.site === "megamoll" && store.featuredProduct);
+  const megamollPost = plan.find((item) => item.type === "social" && item.channel === "facebook" && item.site === "megamoll");
+  if (megamoll && megamollPost) {
+    const product = megamoll.featuredProduct;
+    megamollPost.topic = product.title;
+    megamollPost.trackedUrl = product.url + (product.url.includes("?") ? "&" : "?") + "utm_source=facebook&utm_medium=organic&utm_campaign=megamoll-product-" + day.replaceAll("-", "");
+    megamollPost.imageUrl = product.imageUrl;
+    megamollPost.productId = product.id;
+    megamollPost.text = [
+      product.title,
+      "",
+      product.price ? "Цена: " + product.price + " " + product.currency : "",
+      "Разгледайте продукта: " + megamollPost.trackedUrl,
+      "Телефон: 0876778357",
+    ].filter(Boolean).join("\n");
+  }
+
   let facebookPublished = 0;
   for (const item of plan.filter((entry) => entry.type === "social" && entry.channel === "facebook")) {
     const site = config.sites.find((entry) => entry.slug === item.site);
@@ -551,7 +603,6 @@ async function main() {
   try { searchConsole = await inspectSearchConsole(config, audits); }
   catch (error) { searchConsole = { status: "failed", message: error.message, sites: [] }; }
 
-  const commerce = await monitorCommerce(config);
   const googleAds = await monitorGoogleAds(config);
   const supervisor = await superviseWorkers(config);
   const strategy = buildCompetitiveStrategy(config, audits, commerce);

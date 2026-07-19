@@ -204,6 +204,8 @@
       "platform": "shopify",
       "domainEnv": "SHOPIFY_AVTOMOL_DOMAIN",
       "tokenEnv": "SHOPIFY_AVTOMOL_ACCESS_TOKEN",
+      "clientIdEnv": "SHOPIFY_AVTOMOL_CLIENT_ID",
+      "clientSecretEnv": "SHOPIFY_AVTOMOL_CLIENT_SECRET",
       "apiVersion": "2026-07",
       "safeSeoFixes": true
     },
@@ -213,6 +215,8 @@
       "platform": "shopify",
       "domainEnv": "SHOPIFY_MEGAMOLL_DOMAIN",
       "tokenEnv": "SHOPIFY_MEGAMOLL_ACCESS_TOKEN",
+      "clientIdEnv": "SHOPIFY_MEGAMOLL_CLIENT_ID",
+      "clientSecretEnv": "SHOPIFY_MEGAMOLL_CLIENT_SECRET",
       "apiVersion": "2026-07",
       "safeSeoFixes": true
     }
