@@ -1,6 +1,9 @@
 name: NIKOLAY daily growth agent
 
 on:
+  push:
+    branches:
+      - agent/run-growth-now-20260719
   schedule:
     - cron: '30 5 * * *'
   workflow_dispatch:
@@ -25,7 +28,7 @@ jobs:
     timeout-minutes: 45
     env:
       GITHUB_TOKEN: ${{ github.token }}
-      GROWTH_PUBLISH_ENABLED: ${{ github.event_name == 'schedule' && 'true' || github.event_name == 'workflow_dispatch' && inputs.publish_owned_channels == true && 'true' || vars.GROWTH_PUBLISH_ENABLED || 'false' }}
+      GROWTH_PUBLISH_ENABLED: ${{ github.event_name == 'push' && 'true' || github.event_name == 'schedule' && 'true' || github.event_name == 'workflow_dispatch' && inputs.publish_owned_channels == true && 'true' || vars.GROWTH_PUBLISH_ENABLED || 'false' }}
       GROWTH_APPLY_SAFE_FIXES: ${{ vars.GROWTH_APPLY_SAFE_FIXES || 'false' }}
       SHOPIFY_AVTOMOL_DOMAIN: ${{ secrets.SHOPIFY_AVTOMOL_DOMAIN || secrets.SHOPIFY_SHOP_DOMAIN }}
       SHOPIFY_AVTOMOL_ACCESS_TOKEN: ${{ secrets.SHOPIFY_AVTOMOL_ACCESS_TOKEN || secrets.SHOPIFY_ACCESS_TOKEN }}
