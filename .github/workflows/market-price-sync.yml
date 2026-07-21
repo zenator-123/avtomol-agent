@@ -53,6 +53,7 @@ jobs:
       INPUT_APPLY: ${{ inputs.apply_changes }}
       INPUT_CHANNEL: ${{ inputs.channel }}
       INPUT_LIMIT: ${{ inputs.limit }}
+      OLX_PAID_POSITIONS: '860'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -74,7 +75,7 @@ jobs:
           console.log(JSON.stringify({ apply, channel, limit }));
           NODE
       - name: Validate price plan
-        run: node -e "const x=require('./data/market-price-updates-800.json'); if(x.count!==800||new Set(x.updates.map(v=>v.olx_ad_id)).size!==800) throw new Error('Expected 800 unique advert plans')"
+        run: node -e "const x=require('./data/market-price-updates-800.json'); const n=Number(process.env.OLX_PAID_POSITIONS); const unique=new Set(x.updates.map(v=>String(v.olx_ad_id))); if(x.count!==n||x.updates.length!==n||unique.size!==n) throw new Error('Safety stop: expected '+n+' unique OLX paid-position plans; received count='+x.count+', rows='+x.updates.length+', unique='+unique.size)"
       - name: Synchronize Avtomol.com and Facebook
         run: node scripts/update-market-prices.js
       - name: Upload synchronization report
