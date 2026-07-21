@@ -653,6 +653,11 @@ async function main() {
     }
   }
   console.log(JSON.stringify({ date: day, sitesOnline: audits.filter((item) => item.online).length, sites: audits.length, articles: articles.length, socialPosts: report.content.socialPosts, facebookPublished, searchConsole: searchConsole.status, report: latestHtml }));
+  const publishingEnabled = String(process.env.GROWTH_PUBLISH_ENABLED || '').toLowerCase() === 'true';
+  const plannedFacebook = plan.filter((item) => item.type === 'social' && item.channel === 'facebook').length;
+  if (publishingEnabled && plannedFacebook > 0 && facebookPublished === 0) {
+    throw new Error(`Publishing verification failed: 0 of ${plannedFacebook} planned Facebook posts returned a public URL.`);
+  }
 }
 
 main().catch((error) => {

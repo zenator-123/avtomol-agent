@@ -2,7 +2,8 @@ name: NIKOLAY daily growth agent
 
 on:
   schedule:
-    - cron: '30 5 * * *'
+    # Both UTC equivalents of 22:30 Europe/Sofia; the guard handles DST.
+    - cron: '30 19,20 * * *'
   workflow_dispatch:
     inputs:
       publish_owned_channels:
@@ -51,14 +52,27 @@ jobs:
       FACEBOOK_WATER_PAGE_ID: ${{ secrets.FACEBOOK_WATER_PAGE_ID }}
       FACEBOOK_WATER_PAGE_TOKEN: ${{ secrets.META_SYSTEM_USER_ACCESS_TOKEN || secrets.FACEBOOK_WATER_PAGE_TOKEN }}
     steps:
+      - name: Check that it is 22:00 in Sofia
+        id: sofia_time
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(TZ=Europe/Sofia date +%H)" = "22" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping duplicate UTC schedule; it is not 22:00 in Sofia."
+          fi
       - uses: actions/checkout@v7
+        if: steps.sofia_time.outputs.run == 'true'
       - uses: actions/setup-node@v7
+        if: steps.sofia_time.outputs.run == 'true'
         with:
           node-version: '22'
       - name: Run NIKOLAY
+        if: steps.sofia_time.outputs.run == 'true'
         run: npm run growth:run
       - name: Upload full daily report
-        if: always()
+        if: always() && steps.sofia_time.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: nikolay-daily-report-${{ github.run_number }}
