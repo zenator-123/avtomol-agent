@@ -1,0 +1,90 @@
+name: Replace inactive Avtomol vehicles
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run validates remote state; apply performs the replacement"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      channel:
+        description: "Channel to validate or synchronize"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - shopify
+          - facebook
+          - olx
+      offset:
+        description: "Zero-based replacement offset"
+        required: true
+        default: "0"
+        type: string
+      limit:
+        description: "Number of replacements; 0 means all remaining"
+        required: true
+        default: "0"
+        type: string
+      local_validate_only:
+        description: "Decrypt and validate the manifest without contacting channels"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replace-inactive-avtomol-vehicles
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    name: Validate and replace sold vehicle positions
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      REPLACEMENT_MODE: ${{ inputs.mode }}
+      REPLACEMENT_CHANNEL: ${{ inputs.channel }}
+      REPLACEMENT_OFFSET: ${{ inputs.offset }}
+      REPLACEMENT_LIMIT: ${{ inputs.limit }}
+      REPLACEMENT_LOCAL_VALIDATE_ONLY: ${{ inputs.local_validate_only }}
+      REPLACEMENT_MANIFEST_PATH: data/replacement-vehicles-2026-07-27.enc.json
+      REPLACEMENT_REPORT_PATH: replacement-vehicle-sync-report.json
+      REPLACEMENT_MANIFEST_KEY: ${{ secrets.REPLACEMENT_MANIFEST_KEY }}
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+      SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      FACEBOOK_PAGE_ID: ${{ secrets.FACEBOOK_PAGE_ID }}
+      FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.META_SYSTEM_USER_ACCESS_TOKEN || secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate or synchronize vehicle positions
+        run: node scripts/replace-inactive-vehicles.js
+
+      - name: Upload synchronization report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replacement-vehicle-sync-${{ github.run_id }}
+          path: replacement-vehicle-sync-report.json
+          if-no-files-found: warn
+          retention-days: 30
