@@ -124,6 +124,7 @@ function baseReport(manifest) {
     shopify: {
       productsRead: 0, inactiveMatched: 0, drafted: 0, inventoryZeroed: 0, inventoryZeroSkippedNoScope: 0,
       replacementsMatched: 0, created: 0, updated: 0, pagesCreated: 0, pagesUpdated: 0,
+      pagesSkippedNoScope: 0,
       failures: [], results: [],
     },
     facebook: {
@@ -428,7 +429,17 @@ async function synchronizeShopify(manifest, report) {
     }
   }
 
-  const pages = await listPages();
+  let pages = [];
+  let canManagePages = true;
+  try {
+    pages = await listPages();
+  } catch (error) {
+    if (error.status === 403 && /read_content|write_content|merchant approval/i.test(error.message)) {
+      canManagePages = false;
+    } else {
+      throw error;
+    }
+  }
   const pagesByHandle = new Map(pages.map((page) => [page.handle, page]));
   const onlinePublicationId = await publicationId();
   for (const vehicle of manifest.vehicles) {
@@ -444,12 +455,18 @@ async function synchronizeShopify(manifest, report) {
         product = await createReplacementProduct(vehicle, onlinePublicationId);
         report.shopify.created += 1;
       }
-      const hostedImages = product.hostedImages.length
-        ? product.hostedImages
-        : await hostedProductImages(product.id, vehicle.images.length);
-      const pageAction = await upsertPage(pagesByHandle.get(vehicle.seo.pageHandle), vehicle, hostedImages);
-      if (pageAction === 'created') report.shopify.pagesCreated += 1;
-      else report.shopify.pagesUpdated += 1;
+      let hostedImages = [];
+      let pageAction = 'skipped-no-content-scope';
+      if (canManagePages) {
+        hostedImages = product.hostedImages.length
+          ? product.hostedImages
+          : await hostedProductImages(product.id, vehicle.images.length);
+        pageAction = await upsertPage(pagesByHandle.get(vehicle.seo.pageHandle), vehicle, hostedImages);
+        if (pageAction === 'created') report.shopify.pagesCreated += 1;
+        else report.shopify.pagesUpdated += 1;
+      } else {
+        report.shopify.pagesSkippedNoScope += 1;
+      }
       report.shopify.results.push({
         stock: vehicle.stock,
         handle: vehicle.handle,
