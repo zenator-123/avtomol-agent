@@ -158,16 +158,30 @@ async function getShopifyToken() {
 
 async function shopifyGraphql(query, variables = {}) {
   const shop = required('SHOPIFY_SHOP_DOMAIN').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const { json } = await request(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': await getShopifyToken(),
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  if (json?.errors) throw new Error(`Shopify GraphQL error: ${JSON.stringify(json.errors)}`);
-  return json.data;
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const { json } = await request(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Shopify-Access-Token': await getShopifyToken(),
+      },
+      body: JSON.stringify({ query, variables }),
+    });
+    const errors = json?.errors || [];
+    const throttled = errors.some((error) => error?.extensions?.code === 'THROTTLED');
+    if (throttled && attempt < 12) {
+      const throttle = json?.extensions?.cost?.throttleStatus || {};
+      const restoreRate = Math.max(1, Number(throttle.restoreRate || 50));
+      const requested = Math.max(1, Number(json?.extensions?.cost?.requestedQueryCost || 100));
+      const available = Math.max(0, Number(throttle.currentlyAvailable || 0));
+      const waitMs = Math.min(30000, Math.max(1000, Math.ceil(((requested - available) / restoreRate) * 1000) + 500));
+      await sleep(waitMs);
+      continue;
+    }
+    if (errors.length) throw new Error(`Shopify GraphQL error: ${JSON.stringify(errors)}`);
+    return json.data;
+  }
+  throw new Error('Shopify GraphQL remained throttled after 12 attempts.');
 }
 
 async function shopifyRest(path, options = {}) {
@@ -196,7 +210,6 @@ async function listShopifyProducts() {
               id price sku
             }
           }
-          media(first: 250) { nodes { id status preview { image { url } } } }
           incoming: metafield(namespace: "custom", key: "incoming_number") { value }
           facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value }
         }
