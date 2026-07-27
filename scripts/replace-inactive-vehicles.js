@@ -129,7 +129,8 @@ function baseReport(manifest) {
     },
     facebook: {
       postsRead: 0, inactiveMatched: 0, removed: 0, replacementsMatched: 0,
-      created: 0, updated: 0, failures: [], results: [],
+      created: 0, updated: 0, readSource: 'facebook-feed',
+      failures: [], results: [],
     },
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
@@ -543,8 +544,44 @@ async function updateFacebookVehicle(postId, vehicle) {
   });
 }
 
+async function saveFacebookPostId(productId, postId) {
+  if (!productId || !postId || MODE !== 'apply') return;
+  const data = await shopifyGraphql(`mutation SaveReplacementFacebookPost($metafields: [MetafieldsSetInput!]!) {
+    metafieldsSet(metafields: $metafields) { userErrors { field message } }
+  }`, {
+    metafields: [{
+      ownerId: productId,
+      namespace: 'custom',
+      key: 'facebook_post_id',
+      type: 'single_line_text_field',
+      value: String(postId),
+    }],
+  });
+  if (data.metafieldsSet.userErrors.length) {
+    throw new Error(`Shopify Facebook post metafield rejected: ${JSON.stringify(data.metafieldsSet.userErrors)}`);
+  }
+}
+
 async function synchronizeFacebook(manifest, report) {
-  const posts = await facebookPosts();
+  let posts = [];
+  let shopifyProducts = [];
+  try {
+    posts = await facebookPosts();
+  } catch (error) {
+    const missingReadPermission = error.status === 400
+      && /pages_read_engagement|Page Public Content Access/i.test(error.message);
+    if (!missingReadPermission) throw error;
+    report.facebook.readSource = 'shopify-facebook-post-metafields';
+    shopifyProducts = await listShopifyProducts();
+    const seen = new Set();
+    for (const product of shopifyProducts) {
+      const postId = clean(product.facebookPost?.value);
+      const stock = productStock(product);
+      if (!postId || !stock || seen.has(postId)) continue;
+      seen.add(postId);
+      posts.push({ id: postId, message: `ВХОДЯЩ НОМЕР: ${stock}` });
+    }
+  }
   report.facebook.postsRead = posts.length;
   const postsByStock = new Map();
   for (const post of posts) {
@@ -552,6 +589,11 @@ async function synchronizeFacebook(manifest, report) {
     if (!stock) continue;
     if (!postsByStock.has(stock)) postsByStock.set(stock, []);
     postsByStock.get(stock).push(post);
+  }
+  const shopifyByStock = new Map();
+  for (const product of shopifyProducts) {
+    const stock = productStock(product);
+    if (stock && !shopifyByStock.has(stock)) shopifyByStock.set(stock, product);
   }
   if (OFFSET === 0) {
     for (const inactive of manifest.inactiveVehicles) {
@@ -579,6 +621,7 @@ async function synchronizeFacebook(manifest, report) {
         report.facebook.results.push({ stock: vehicle.stock, postId: matches[0].id, action: 'update-replacement' });
       } else {
         const result = await publishFacebookVehicle(vehicle);
+        await saveFacebookPostId(shopifyByStock.get(vehicle.stock)?.id, result.post_id || result.id);
         report.facebook.created += 1;
         report.facebook.results.push({ stock: vehicle.stock, postId: result.post_id || result.id, action: 'create-replacement' });
       }
