@@ -651,6 +651,9 @@ async function getOlxToken() {
     olxToken = current;
     return olxToken;
   }
+  if (MODE === 'dry-run') {
+    throw new Error('OLX access token is expired or invalid. Dry-run deliberately did not rotate the refresh token; update OLX_ACCESS_TOKEN before applying changes.');
+  }
   const { json } = await request('https://www.olx.bg/api/open/oauth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
