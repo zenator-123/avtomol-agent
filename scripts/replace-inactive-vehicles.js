@@ -122,7 +122,7 @@ function baseReport(manifest) {
       inactiveVehicles: manifest.inactiveVehicles.length,
     },
     shopify: {
-      productsRead: 0, inactiveMatched: 0, drafted: 0, inventoryZeroed: 0,
+      productsRead: 0, inactiveMatched: 0, drafted: 0, inventoryZeroed: 0, inventoryZeroSkippedNoScope: 0,
       replacementsMatched: 0, created: 0, updated: 0, pagesCreated: 0, pagesUpdated: 0,
       failures: [], results: [],
     },
@@ -194,10 +194,6 @@ async function listShopifyProducts() {
           variants(first: 1) {
             nodes {
               id price sku
-              inventoryItem {
-                id
-                inventoryLevels(first: 5) { nodes { location { id } } }
-              }
             }
           }
           media(first: 250) { nodes { id status preview { image { url } } } }
@@ -222,7 +218,6 @@ function productStock(product) {
 }
 
 async function setProductDraftAndZero(product, report) {
-  const variant = product.variants?.nodes?.[0];
   if (MODE === 'apply' && product.status !== 'DRAFT') {
     const data = await shopifyGraphql(`mutation DraftReplacementProduct($product: ProductUpdateInput!) {
       productUpdate(product: $product) { userErrors { field message } }
@@ -230,25 +225,10 @@ async function setProductDraftAndZero(product, report) {
     if (data.productUpdate.userErrors.length) throw new Error(JSON.stringify(data.productUpdate.userErrors));
     report.shopify.drafted += 1;
   } else if (product.status !== 'DRAFT') report.shopify.drafted += 1;
-
-  const inventoryItemId = variant?.inventoryItem?.id;
-  const locationId = variant?.inventoryItem?.inventoryLevels?.nodes?.[0]?.location?.id;
-  if (inventoryItemId && locationId) {
-    if (MODE === 'apply') {
-      const data = await shopifyGraphql(`mutation ZeroReplacementInventory($input: InventorySetQuantitiesInput!) {
-        inventorySetQuantities(input: $input) { userErrors { field message } }
-      }`, {
-        input: {
-          name: 'available',
-          reason: 'correction',
-          ignoreCompareQuantity: true,
-          quantities: [{ inventoryItemId, locationId, quantity: 0 }],
-        },
-      });
-      if (data.inventorySetQuantities.userErrors.length) throw new Error(JSON.stringify(data.inventorySetQuantities.userErrors));
-    }
-    report.shopify.inventoryZeroed += 1;
-  }
+  // The installed custom app intentionally has no inventory scopes. Draft status
+  // removes the sold product from every storefront without querying restricted
+  // inventory levels. Record the skipped quantity update explicitly in the report.
+  report.shopify.inventoryZeroSkippedNoScope += 1;
 }
 
 async function publicationId() {
