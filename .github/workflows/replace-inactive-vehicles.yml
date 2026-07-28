@@ -75,7 +75,7 @@ jobs:
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: ${{ inputs.allow_olx_refresh }}
       OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
-      OLX_TOKEN_HANDOFF_PATH: ${{ runner.temp }}/olx-refreshed-token.json
+      OLX_TOKEN_HANDOFF_PATH: ${{ github.workspace }}/olx-refreshed-token.json
 
     steps:
       - name: Check out repository
