@@ -1,0 +1,65 @@
+name: Apply full Avtomol vehicle status
+
+on:
+  schedule:
+    - cron: "31 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run reports changes; apply changes product status"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - apply
+      batch_limit:
+        description: "Maximum product status changes in this run"
+        required: true
+        default: "2500"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apply-full-avtomol-vehicle-status
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Hide sold vehicles and activate existing replacements
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      FULL_CATALOG_STATUS_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+      FULL_CATALOG_STATUS_BATCH_LIMIT: ${{ github.event_name == 'schedule' && '2500' || inputs.batch_limit }}
+      FULL_CATALOG_STATUS_CONCURRENCY: "6"
+      FULL_CATALOG_AUDIT_MANIFEST_PATH: data/full-catalog-stock-audit.enc.json
+      FULL_CATALOG_STATUS_REPORT_PATH: full-catalog-status-report.json
+      REPLACEMENT_MANIFEST_KEY: ${{ secrets.REPLACEMENT_MANIFEST_KEY }}
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+      SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Apply full catalog status
+        run: node scripts/apply-full-catalog-status.js
+
+      - name: Upload status report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: full-catalog-status-${{ github.run_id }}
+          path: full-catalog-status-report.json
+          if-no-files-found: error
+          retention-days: 30

@@ -271,7 +271,17 @@ async function main() {
   }, null, 2));
 }
 
-main().catch((error) => {
-  console.error(error.stack || error.message);
-  process.exitCode = 1;
-});
+module.exports = {
+  decryptManifest,
+  validateManifest,
+  listShopifyProducts,
+  productStock,
+  shopifyGraphql,
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error.stack || error.message);
+    process.exitCode = 1;
+  });
+}
