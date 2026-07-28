@@ -858,7 +858,6 @@ function olxPayload(vehicle, template, definitions) {
     description: vehicle.plainDescription.slice(0, 9000),
     category_id: template.category_id,
     advertiser_type: template.advertiser_type || 'business',
-    external_url: `https://avtomol.com/products/${vehicle.handle}`,
     external_id: vehicle.handle,
     contact: template.contact,
     location: template.location,
