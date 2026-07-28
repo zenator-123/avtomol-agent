@@ -9,6 +9,8 @@ const OFFSET = Math.max(0, Number(process.env.REPLACEMENT_OFFSET || 0));
 const LIMIT = Math.max(0, Number(process.env.REPLACEMENT_LIMIT || 0));
 const LOCAL_VALIDATE_ONLY = String(process.env.REPLACEMENT_LOCAL_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const ALLOW_OLX_REFRESH = String(process.env.OLX_ALLOW_REFRESH || 'false').toLowerCase() === 'true';
+const FACEBOOK_CREATE_LIMIT = Math.max(0, Number(process.env.FACEBOOK_CREATE_LIMIT || 0));
+const FACEBOOK_UPDATE_EXISTING = String(process.env.FACEBOOK_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
 const REPORT_PATH = process.env.REPLACEMENT_REPORT_PATH || 'replacement-vehicle-sync-report.json';
 const OLX_TOKEN_HANDOFF_PATH = process.env.OLX_TOKEN_HANDOFF_PATH || '';
@@ -155,7 +157,8 @@ function baseReport(manifest) {
     },
     facebook: {
       postsRead: 0, inactiveMatched: 0, removed: 0, replacementsMatched: 0,
-      created: 0, updated: 0, readSource: 'facebook-feed',
+      created: 0, updated: 0, existingSkipped: 0, deferred: 0,
+      rateLimited: false, rateLimitError: '', readSource: 'facebook-feed',
       configuredPageId: '', tokenPageId: '', tokenPageName: '', pageIdentityMatches: false,
       tokenDerivedFromManagedPages: false,
       failures: [], results: [],
@@ -624,6 +627,11 @@ async function updateFacebookVehicle(postId, vehicle) {
   });
 }
 
+function isFacebookRateLimitError(error) {
+  return Number(error?.body?.error?.code) === 368
+    || Number(error?.body?.error?.error_subcode) === 1390008;
+}
+
 async function saveFacebookPostId(productId, postId) {
   if (!productId || !postId || MODE !== 'apply') return;
   const data = await shopifyGraphql(`mutation SaveReplacementFacebookPost($metafields: [MetafieldsSetInput!]!) {
@@ -702,22 +710,50 @@ async function synchronizeFacebook(manifest, report) {
       }
     }
   }
-  for (const vehicle of manifest.vehicles) {
+  let createdThisRun = 0;
+  for (let index = 0; index < manifest.vehicles.length; index += 1) {
+    const vehicle = manifest.vehicles[index];
     const matches = postsByStock.get(vehicle.stock) || [];
     try {
       if (matches.length) {
         report.facebook.replacementsMatched += 1;
-        await updateFacebookVehicle(matches[0].id, vehicle);
-        report.facebook.updated += 1;
+        if (FACEBOOK_UPDATE_EXISTING) {
+          await updateFacebookVehicle(matches[0].id, vehicle);
+          report.facebook.updated += 1;
+        } else {
+          report.facebook.existingSkipped += 1;
+        }
         for (const duplicate of matches.slice(1)) await deleteFacebookPost(duplicate.id);
-        report.facebook.results.push({ stock: vehicle.stock, postId: matches[0].id, action: 'update-replacement' });
+        report.facebook.results.push({
+          stock: vehicle.stock,
+          postId: matches[0].id,
+          action: FACEBOOK_UPDATE_EXISTING ? 'update-replacement' : 'retain-existing',
+        });
       } else {
+        if (FACEBOOK_CREATE_LIMIT && createdThisRun >= FACEBOOK_CREATE_LIMIT) {
+          report.facebook.deferred += 1;
+          continue;
+        }
         const result = await publishFacebookVehicle(vehicle, pageId);
         await saveFacebookPostId(shopifyByStock.get(vehicle.stock)?.id, result.post_id || result.id);
         report.facebook.created += 1;
+        createdThisRun += 1;
         report.facebook.results.push({ stock: vehicle.stock, postId: result.post_id || result.id, action: 'create-replacement' });
+        if (createdThisRun % 10 === 0) {
+          console.log(`Facebook replacement progress: ${createdThisRun} created in this run.`);
+        }
       }
     } catch (error) {
+      if (isFacebookRateLimitError(error)) {
+        report.facebook.rateLimited = true;
+        report.facebook.rateLimitError = 'Meta publishing cooldown (OAuth code 368, subcode 1390008).';
+        report.facebook.deferred += 1;
+        for (const remaining of manifest.vehicles.slice(index + 1)) {
+          if (!(postsByStock.get(remaining.stock) || []).length) report.facebook.deferred += 1;
+        }
+        console.warn(`::warning title=Facebook publishing cooldown::${report.facebook.deferred} missing replacement(s) deferred to the next scheduled batch.`);
+        break;
+      }
       report.facebook.failures.push({ stock: vehicle.stock, action: 'replace', error: error.message });
     }
   }

@@ -1,6 +1,8 @@
 name: Replace inactive Avtomol vehicles
 
 on:
+  schedule:
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -55,11 +57,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      REPLACEMENT_MODE: ${{ inputs.mode }}
-      REPLACEMENT_CHANNEL: ${{ inputs.channel }}
-      REPLACEMENT_OFFSET: ${{ inputs.offset }}
-      REPLACEMENT_LIMIT: ${{ inputs.limit }}
-      REPLACEMENT_LOCAL_VALIDATE_ONLY: ${{ inputs.local_validate_only }}
+      REPLACEMENT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+      REPLACEMENT_CHANNEL: ${{ github.event_name == 'schedule' && 'facebook' || inputs.channel }}
+      REPLACEMENT_OFFSET: ${{ github.event_name == 'schedule' && '0' || inputs.offset }}
+      REPLACEMENT_LIMIT: ${{ github.event_name == 'schedule' && '0' || inputs.limit }}
+      REPLACEMENT_LOCAL_VALIDATE_ONLY: ${{ github.event_name == 'schedule' && 'false' || inputs.local_validate_only }}
+      FACEBOOK_CREATE_LIMIT: ${{ github.event_name == 'schedule' && '20' || '0' }}
+      FACEBOOK_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'false' || 'true' }}
       REPLACEMENT_MANIFEST_PATH: data/replacement-vehicles-2026-07-27.enc.json
       REPLACEMENT_REPORT_PATH: replacement-vehicle-sync-report.json
       REPLACEMENT_MANIFEST_KEY: ${{ secrets.REPLACEMENT_MANIFEST_KEY }}
