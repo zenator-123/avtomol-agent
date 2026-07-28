@@ -17,6 +17,10 @@ if (!['dry-run', 'apply'].includes(MODE)) throw new Error(`Invalid FULL_REPLACEM
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const clean = value => String(value ?? '').trim();
 const stockFrom = value => clean(value).toUpperCase().match(/\b[A-Z]{2}\d{5}\b/)?.[0] || '';
+const isDailyVariantQuotaError = error => (
+  /daily.{0,80}variant|variant.{0,80}daily|50,?000.{0,80}variant|maximum.{0,80}variant/i
+    .test(String(error?.message || error))
+);
 
 function required(name) {
   const value = process.env[name];
@@ -323,6 +327,7 @@ async function main() {
     selected: 0,
     created: 0,
     updated: 0,
+    deferredByDailyVariantLimit: 0,
     failures: [],
     results: [],
   };
@@ -389,6 +394,23 @@ async function main() {
         });
       }
     } catch (error) {
+      if (!product && isDailyVariantQuotaError(error)) {
+        report.deferredByDailyVariantLimit = manifest.vehicles.length
+          - report.alreadyCurrent
+          - report.created
+          - report.updated;
+        report.results.push({
+          stock: vehicle.stock,
+          handle: vehicle.handle,
+          action: 'deferred-daily-variant-limit',
+          error: error.message,
+        });
+        console.warn(
+          `::warning title=Shopify daily variant limit reached::`
+          + `${report.deferredByDailyVariantLimit} vehicle(s) deferred safely.`,
+        );
+        break;
+      }
       report.failures.push({
         stock: vehicle.stock,
         handle: vehicle.handle,
