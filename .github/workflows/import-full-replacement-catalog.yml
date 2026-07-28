@@ -1,0 +1,60 @@
+name: Import full verified replacement catalog
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run or apply"
+        required: true
+        default: "dry-run"
+        type: choice
+        options:
+          - dry-run
+          - apply
+      batch_limit:
+        description: "Maximum vehicles to create/update"
+        required: true
+        default: "25"
+        type: string
+  schedule:
+    - cron: "7 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-full-verified-replacement-catalog
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      SHOPIFY_SHOP_DOMAIN: ${{ secrets.SHOPIFY_SHOP_DOMAIN }}
+      SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+      SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+      FULL_REPLACEMENT_MANIFEST_KEY: ${{ secrets.FULL_REPLACEMENT_MANIFEST_KEY }}
+      FULL_REPLACEMENT_MANIFEST_PATH: data/full-replacement-catalog-2026-07-28.enc.json
+      FULL_REPLACEMENT_REPORT_PATH: full-replacement-catalog-import-report.json
+      FULL_REPLACEMENT_GENERATION: "2026-07-28"
+      FULL_REPLACEMENT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
+      FULL_REPLACEMENT_LIMIT: ${{ github.event_name == 'schedule' && '50' || inputs.batch_limit }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Import verified replacement batch
+        run: node scripts/import-full-replacement-catalog.js
+
+      - name: Upload import report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-replacement-import-${{ github.run_id }}
+          path: full-replacement-catalog-import-report.json
+          if-no-files-found: warn
+          retention-days: 30
