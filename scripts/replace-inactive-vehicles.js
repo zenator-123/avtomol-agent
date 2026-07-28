@@ -156,6 +156,7 @@ function baseReport(manifest) {
     facebook: {
       postsRead: 0, inactiveMatched: 0, removed: 0, replacementsMatched: 0,
       created: 0, updated: 0, readSource: 'facebook-feed',
+      configuredPageId: '', tokenPageId: '', tokenPageName: '', pageIdentityMatches: false,
       failures: [], results: [],
     },
     olx: {
@@ -515,9 +516,16 @@ function facebookUrl(path) {
   return url;
 }
 
-async function facebookPosts() {
+async function facebookIdentity() {
+  const { json } = await request(facebookUrl('me?fields=id,name').toString());
+  if (!json?.id || !json?.name) {
+    throw new Error('Facebook Page token did not return a Page identity.');
+  }
+  return { id: String(json.id), name: String(json.name) };
+}
+
+async function facebookPosts(pageId) {
   const posts = [];
-  const pageId = required('FACEBOOK_PAGE_ID');
   let next = facebookUrl(`${pageId}/feed?fields=id,message,created_time&limit=100`).toString();
   for (let page = 0; next && page < 100; page += 1) {
     const { json } = await request(next);
@@ -547,9 +555,8 @@ async function deleteFacebookPost(postId) {
   });
 }
 
-async function publishFacebookVehicle(vehicle) {
+async function publishFacebookVehicle(vehicle, pageId) {
   if (MODE !== 'apply') return { id: `dry-run:${vehicle.stock}` };
-  const pageId = required('FACEBOOK_PAGE_ID');
   const body = new URLSearchParams({
     url: vehicle.images[0].url,
     caption: facebookMessage(vehicle),
@@ -590,10 +597,20 @@ async function saveFacebookPostId(productId, postId) {
 }
 
 async function synchronizeFacebook(manifest, report) {
+  const configuredPageId = required('FACEBOOK_PAGE_ID');
+  const tokenPage = await facebookIdentity();
+  report.facebook.configuredPageId = configuredPageId;
+  report.facebook.tokenPageId = tokenPage.id;
+  report.facebook.tokenPageName = tokenPage.name;
+  report.facebook.pageIdentityMatches = tokenPage.id === configuredPageId;
+  if (!/avtomol(?:\.com)?/i.test(tokenPage.name.replace(/\s+/g, ''))) {
+    throw new Error(`Safety stop: Facebook token belongs to unexpected Page "${tokenPage.name}".`);
+  }
+  const pageId = tokenPage.id;
   let posts = [];
   let shopifyProducts = [];
   try {
-    posts = await facebookPosts();
+    posts = await facebookPosts(pageId);
   } catch (error) {
     const missingReadPermission = error.status === 400
       && /pages_read_engagement|Page Public Content Access/i.test(error.message);
@@ -647,7 +664,7 @@ async function synchronizeFacebook(manifest, report) {
         for (const duplicate of matches.slice(1)) await deleteFacebookPost(duplicate.id);
         report.facebook.results.push({ stock: vehicle.stock, postId: matches[0].id, action: 'update-replacement' });
       } else {
-        const result = await publishFacebookVehicle(vehicle);
+        const result = await publishFacebookVehicle(vehicle, pageId);
         await saveFacebookPostId(shopifyByStock.get(vehicle.stock)?.id, result.post_id || result.id);
         report.facebook.created += 1;
         report.facebook.results.push({ stock: vehicle.stock, postId: result.post_id || result.id, action: 'create-replacement' });
