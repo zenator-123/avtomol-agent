@@ -206,7 +206,10 @@ async function setVariant(productId, variantId, vehicle) {
     variants: [{
       id: variantId,
       price: Number(vehicle.price).toFixed(2),
-      sku: vehicle.stock,
+      inventoryItem: {
+        sku: vehicle.stock,
+        requiresShipping: true,
+      },
     }],
   });
   if (data.productVariantsBulkUpdate.userErrors.length) {
