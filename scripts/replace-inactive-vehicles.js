@@ -23,8 +23,9 @@ const normalized = (value) => clean(value)
   .normalize('NFKD')
   .replace(/\p{Diacritic}/gu, '')
   .toLowerCase()
-  .replace(/[^a-zа-я0-9]+/gu, ' ')
+  .replace(/[^\p{L}\p{N}]+/gu, ' ')
   .trim();
+const normalizedLoose = (value) => normalized(value).replace(/\s+/g, '');
 
 function required(name) {
   const value = process.env[name];
@@ -41,7 +42,9 @@ async function request(url, options = {}, attempts = 5) {
       try { json = JSON.parse(text); } catch { json = { raw: text.slice(0, 1000) }; }
     }
     if (response.ok) return { response, json, text };
-    if ((response.status === 429 || response.status >= 500) && attempt < attempts) {
+    const transientCloudFrontBlock = response.status === 403
+      && /cloudfront|request blocked|request could not be satisfied/i.test(text);
+    if ((response.status === 429 || response.status >= 500 || transientCloudFrontBlock) && attempt < attempts) {
       await sleep(Math.min(15000, 750 * (2 ** (attempt - 1))));
       continue;
     }
@@ -728,8 +731,18 @@ async function deactivateAndDeleteOlx(advert) {
     });
     deactivated = true;
   }
-  await olxRequest(`adverts/${advert.id}`, { method: 'DELETE' });
-  return { deactivated, deleted: true };
+  try {
+    await olxRequest(`adverts/${advert.id}`, { method: 'DELETE' });
+    return { deactivated, deleted: true, alreadyInactive: false };
+  } catch (error) {
+    const invalidAdvertState = error.status === 400
+      && /"field":"ad"/i.test(JSON.stringify(error.body || {}))
+      && /invalid request|invalid state|невалидн/i.test(`${error.message} ${JSON.stringify(error.body || {})}`);
+    if (invalidAdvertState) {
+      return { deactivated, deleted: false, alreadyInactive: true };
+    }
+    throw error;
+  }
 }
 
 async function categoryAttributes(categoryId) {
@@ -757,6 +770,7 @@ function attributeKind(definition) {
   const text = `${code} ${label}`;
   if (code === 'auto make year' || code === 'year') return 'year';
   if (code === 'model') return 'model';
+  if (code === 'state') return 'condition';
   if (/\b(model|model)\b/.test(text)) return 'model';
   if (/\b(brand|make|marka|марка)\b/u.test(text)) return 'brand';
   if (/\b(year|make year|godina|година)\b/u.test(text)) return 'year';
@@ -771,14 +785,24 @@ function attributeKind(definition) {
 
 function candidateLabels(kind, vehicle) {
   if (kind === 'brand') return [vehicle.brand];
-  if (kind === 'model') return [vehicle.model, vehicle.model.split(/\s+/).slice(0, 3).join(' '), vehicle.model.split(/\s+/)[0]];
+  if (kind === 'model') {
+    const words = clean(vehicle.model).split(/\s+/).filter(Boolean);
+    const first = words[0] || '';
+    const aliases = [];
+    const series = first.match(/^(\d)er$/i);
+    if (series) aliases.push(`${series[1]} series`, `series ${series[1]}`);
+    if (/^ds\d$/i.test(first)) aliases.push(first.replace(/^ds/i, 'DS '));
+    return [vehicle.model, words.slice(0, 3).join(' '), first, ...aliases];
+  }
   if (kind === 'fuel') {
     const map = {
       diesel: ['diesel', 'дизел'],
       petrol: ['petrol', 'gasoline', 'бензин'],
       gasoline: ['petrol', 'gasoline', 'бензин'],
-      lpg: ['lpg', 'gas', 'газ'],
-      electric: ['electric', 'електрически'],
+      lpg: ['lpg', 'gas', 'газ', 'бензин газ'],
+      'liquified petroleum gas': ['lpg', 'gas', 'газ', 'бензин газ'],
+      'liquefied petroleum gas': ['lpg', 'gas', 'газ', 'бензин газ'],
+      electric: ['electric', 'electricity', 'ev', 'електрически'],
       hybrid: ['hybrid', 'хибрид'],
     };
     return map[normalized(vehicle.fuel)] || [vehicle.fuel];
@@ -790,31 +814,52 @@ function candidateLabels(kind, vehicle) {
   }
   if (kind === 'body') {
     const map = {
-      van: ['van', 'миниван', 'ван'],
-      limousine: ['sedan', 'седан'],
-      estate: ['estate', 'комби'],
-      suv: ['suv', 'джип'],
+      van: ['van', 'minivan', 'миниван', 'ван'],
+      'panel van': ['van', 'panel van', 'cargo van', 'миниван', 'ван'],
+      'panel van high': ['van', 'panel van', 'cargo van', 'миниван', 'ван'],
+      bus: ['bus', 'minibus', 'van', 'автобус', 'микробус', 'ван'],
+      'chassis cab': ['chassis cab', 'truck', 'van', 'шаси кабина', 'камион', 'ван'],
+      limousine: ['sedan', 'лимузина', 'седан'],
+      sedan: ['sedan', 'лимузина', 'седан'],
+      estate: ['estate', 'station wagon', 'wagon', 'combi', 'комби'],
+      'station wagon': ['estate', 'station wagon', 'wagon', 'combi', 'комби'],
+      suv: ['suv', 'jeep', 'джип'],
       hatchback: ['hatchback', 'хечбек'],
       coupe: ['coupe', 'купе'],
-      convertible: ['convertible', 'кабрио'],
+      convertible: ['convertible', 'cabrio', 'кабрио'],
     };
     return map[normalized(vehicle.bodyType)] || [vehicle.bodyType];
   }
-  if (kind === 'condition') return ['used', 'употребяван'];
+  if (kind === 'condition') return ['used', 'употребяван', 'втора употреба'];
   return [];
 }
 
 function resolveEnum(definition, kind, vehicle) {
   const values = allValues(definition);
   const candidates = candidateLabels(kind, vehicle).map(normalized).filter(Boolean);
+  const looseCandidates = candidates.map(normalizedLoose);
   if (!candidates.length) return '';
   const exact = values.find((value) => candidates.includes(normalized(value.label)) || candidates.includes(normalized(value.code)));
   if (exact) return exact.code;
+  const looseExact = values.find((value) => {
+    const label = normalizedLoose(value.label);
+    const code = normalizedLoose(value.code);
+    return looseCandidates.includes(label) || looseCandidates.includes(code);
+  });
+  if (looseExact) return looseExact.code;
   const contains = values.find((value) => {
     const label = normalized(value.label);
     return candidates.some((candidate) => label.includes(candidate) || candidate.includes(label));
   });
-  return contains?.code || '';
+  if (contains) return contains.code;
+  if (kind === 'model' || kind === 'body') {
+    const generic = values.find((value) => {
+      const text = normalized(`${value.code} ${value.label}`);
+      return /\b(other|others|друг|други)\b/u.test(text);
+    });
+    if (generic) return generic.code;
+  }
+  return '';
 }
 
 function makeAttributes(definitions, vehicle, template) {
@@ -834,13 +879,25 @@ function makeAttributes(definitions, vehicle, template) {
     else if (kind === 'mileage') value = String(vehicle.mileage || '');
     else if (kind === 'power') value = String(vehicle.horsepower || vehicle.powerKw || '');
     else if (kind) value = resolveEnum(definition, kind, vehicle);
+    else if (normalized(code) === 'type') {
+      // This optional value is model-dependent in OLX. Reusing it from
+      // another advert causes params.type validation failures.
+      value = '';
+    }
     else if (templateMap.has(code)) {
       const templateValue = templateMap.get(code);
       if (Array.isArray(templateValue.values) && templateValue.values.length) {
-        attributes.push({ code, values: templateValue.values });
-        continue;
+        const allowed = allValues(definition);
+        const valid = !allowed.length
+          || templateValue.values.every((item) => allowed.some((option) => option.code === clean(item)));
+        if (valid) {
+          attributes.push({ code, values: templateValue.values });
+          continue;
+        }
       }
       value = clean(templateValue.value);
+      const allowed = allValues(definition);
+      if (allowed.length && !allowed.some((option) => option.code === value)) value = '';
     }
     if (value) {
       if (allowMultipleValues) attributes.push({ code, values: [value] });
@@ -914,7 +971,11 @@ async function synchronizeOlx(manifest, report) {
           const result = await deactivateAndDeleteOlx(advert);
           if (result.deactivated) report.olx.deactivated += 1;
           if (result.deleted) report.olx.deleted += 1;
-          report.olx.results.push({ stock: inactive.stock, advertId: id, action: 'remove-inactive' });
+          report.olx.results.push({
+            stock: inactive.stock,
+            advertId: id,
+            action: result.alreadyInactive ? 'inactive-already-nonactive' : 'remove-inactive',
+          });
         } catch (error) {
           report.olx.failures.push({ stock: inactive.stock, advertId: id, action: 'remove-inactive', error: error.message });
         }
