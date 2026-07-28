@@ -855,7 +855,7 @@ function resolveEnum(definition, kind, vehicle) {
   if (kind === 'model' || kind === 'body') {
     const generic = values.find((value) => {
       const text = normalized(`${value.code} ${value.label}`);
-      return /\b(other|others|друг|други)\b/u.test(text);
+      return /\b(other|others|other model|all models|друг|друга|друго|други|останал|останалите|всички модели)\b/u.test(text);
     });
     if (generic) return generic.code;
   }
@@ -903,7 +903,15 @@ function makeAttributes(definitions, vehicle, template) {
       if (allowMultipleValues) attributes.push({ code, values: [value] });
       else attributes.push({ code, value });
     }
-    else if (requiredAttribute) unresolved.push({ code, label: definition.label || definition.name || '', kind });
+    else if (requiredAttribute) {
+      unresolved.push({
+        code,
+        label: definition.label || definition.name || '',
+        kind,
+        candidates: candidateLabels(kind, vehicle),
+        availableValues: allValues(definition).slice(0, 250),
+      });
+    }
   }
   return { attributes, unresolved };
 }
