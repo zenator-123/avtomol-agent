@@ -755,6 +755,8 @@ function attributeKind(definition) {
   const code = normalized(definition.code);
   const label = normalized(definition.label || definition.name);
   const text = `${code} ${label}`;
+  if (code === 'auto make year' || code === 'year') return 'year';
+  if (code === 'model') return 'model';
   if (/\b(model|model)\b/.test(text)) return 'model';
   if (/\b(brand|make|marka|марка)\b/u.test(text)) return 'brand';
   if (/\b(year|make year|godina|година)\b/u.test(text)) return 'year';
@@ -923,11 +925,37 @@ async function synchronizeOlx(manifest, report) {
 
   const templateSummary = adverts.find((advert) => Number(advert.category_id) > 0);
   if (!templateSummary) throw new Error('OLX account has no advert that can be used for contact, location and category settings.');
-  const template = await readOlxAdvert(templateSummary.id);
-  const definitions = await categoryAttributes(template.category_id);
+  const fallbackTemplate = await readOlxAdvert(templateSummary.id);
+  const categoryConfigCache = new Map();
+
+  async function categoryConfigFor(vehicle) {
+    const brand = normalized(vehicle.brand);
+    const matchingSummary = adverts.find((advert) => {
+      const title = normalized(advert.title);
+      return title === brand || title.startsWith(`${brand} `);
+    });
+    let categoryId = Number(matchingSummary?.category_id || 0);
+    if (!categoryId) {
+      const { json } = await olxRequest(`categories/suggestion?q=${encodeURIComponent(vehicle.title)}`);
+      const suggestions = json?.data || json || [];
+      const suggestion = suggestions.find((item) => Number(item?.id) > 0);
+      categoryId = Number(suggestion?.id || 0);
+    }
+    if (!categoryId) throw new Error(`No OLX vehicle category found for ${vehicle.brand}.`);
+    if (!categoryConfigCache.has(categoryId)) {
+      const template = matchingSummary
+        ? await readOlxAdvert(matchingSummary.id)
+        : { ...fallbackTemplate, category_id: categoryId };
+      const definitions = await categoryAttributes(categoryId);
+      categoryConfigCache.set(categoryId, { template: { ...template, category_id: categoryId }, definitions });
+    }
+    return categoryConfigCache.get(categoryId);
+  }
+
   for (const vehicle of manifest.vehicles) {
     const existing = advertByExternal.get(vehicle.handle.toLowerCase());
     try {
+      const { template, definitions } = await categoryConfigFor(vehicle);
       const { payload, unresolved } = olxPayload(vehicle, template, definitions);
       if (unresolved.length) {
         report.olx.unresolvedAttributes.push({ stock: vehicle.stock, unresolved });
