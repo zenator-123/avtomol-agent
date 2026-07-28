@@ -550,14 +550,35 @@ async function facebookIdentity() {
 }
 
 async function facebookPosts(pageId) {
-  const posts = [];
-  let next = facebookUrl(`${pageId}/feed?fields=id,message,created_time&limit=100`).toString();
-  for (let page = 0; next && page < 100; page += 1) {
-    const { json } = await request(next);
-    posts.push(...(json.data || []));
-    next = json.paging?.next || '';
+  const endpoints = ['published_posts', 'posts', 'feed'];
+  const diagnostics = [];
+  let emptyResult = null;
+  let lastError = null;
+  for (const endpoint of endpoints) {
+    const posts = [];
+    let next = facebookUrl(`${pageId}/${endpoint}?fields=id,message,created_time&limit=100`).toString();
+    try {
+      for (let page = 0; next && page < 100; page += 1) {
+        const { json } = await request(next);
+        posts.push(...(json.data || []));
+        next = json.paging?.next || '';
+      }
+      diagnostics.push({ endpoint, ok: true, posts: posts.length });
+      if (posts.length) {
+        return { posts, source: `facebook-${endpoint}`, diagnostics };
+      }
+      if (!emptyResult) emptyResult = { posts, source: `facebook-${endpoint}`, diagnostics };
+    } catch (error) {
+      lastError = error;
+      diagnostics.push({ endpoint, ok: false, error: error.message });
+    }
   }
-  return posts;
+  if (emptyResult) return { ...emptyResult, diagnostics };
+  if (lastError) {
+    lastError.facebookReadDiagnostics = diagnostics;
+    throw lastError;
+  }
+  return { posts: [], source: 'facebook-published_posts', diagnostics };
 }
 
 function facebookMessage(vehicle) {
@@ -633,8 +654,12 @@ async function synchronizeFacebook(manifest, report) {
   let posts = [];
   let shopifyProducts = [];
   try {
-    posts = await facebookPosts(pageId);
+    const facebookRead = await facebookPosts(pageId);
+    posts = facebookRead.posts;
+    report.facebook.readSource = facebookRead.source;
+    report.facebook.readDiagnostics = facebookRead.diagnostics;
   } catch (error) {
+    report.facebook.readDiagnostics = error.facebookReadDiagnostics || [{ error: error.message }];
     const missingReadPermission = error.status === 400
       && /pages_read_engagement|Page Public Content Access/i.test(error.message);
     if (!missingReadPermission) throw error;
