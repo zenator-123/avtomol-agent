@@ -74,6 +74,7 @@ function validateManifest(manifest) {
   if (!manifest || !Array.isArray(manifest.vehicles) || !Array.isArray(manifest.inactiveVehicles)) {
     throw new Error('Invalid replacement manifest structure.');
   }
+  const olxFallbackVehicles = Array.isArray(manifest.olxFallbackVehicles) ? manifest.olxFallbackVehicles : [];
   if (manifest.vehicles.length !== 462 || manifest.inactiveVehicles.length !== 462) {
     throw new Error(`Safety stop: expected 462 replacements and 462 inactive vehicles, received ${manifest.vehicles.length} and ${manifest.inactiveVehicles.length}.`);
   }
@@ -100,6 +101,24 @@ function validateManifest(manifest) {
     }
     newStocks.add(vehicle.stock);
   }
+  for (const vehicle of olxFallbackVehicles) {
+    if (!/^[A-Z]{2}\d{5}$/.test(vehicle.stock) || newStocks.has(vehicle.stock)) {
+      throw new Error(`Invalid or duplicate OLX fallback stock: ${vehicle.stock}`);
+    }
+    if (vehicle.directPurchase !== true || vehicle.isUnroadworthy !== false) {
+      throw new Error(`Safety stop: OLX fallback ${vehicle.stock} is not a confirmed roadworthy direct purchase.`);
+    }
+    if (!(Number(vehicle.price) > Number(vehicle.landedCost)) || !(Number(vehicle.expectedGrossProfit) > 0)) {
+      throw new Error(`Safety stop: OLX fallback ${vehicle.stock} has no positive protected margin.`);
+    }
+    if (!vehicle.handle || !vehicle.title || !vehicle.plainDescription || !Array.isArray(vehicle.images) || !vehicle.images.length) {
+      throw new Error(`Safety stop: OLX fallback ${vehicle.stock} has incomplete listing data.`);
+    }
+    if (vehicle.plainDescription.includes('???')) {
+      throw new Error(`Safety stop: OLX fallback ${vehicle.stock} contains invalid UTF-8 placeholders.`);
+    }
+    newStocks.add(vehicle.stock);
+  }
   for (const vehicle of manifest.inactiveVehicles) {
     if (!/^[A-Z]{2}\d{5}$/.test(vehicle.stock) || oldStocks.has(vehicle.stock)) {
       throw new Error(`Invalid or duplicate inactive stock: ${vehicle.stock}`);
@@ -111,6 +130,7 @@ function validateManifest(manifest) {
   return {
     ...manifest,
     vehicles: LIMIT ? manifest.vehicles.slice(OFFSET, OFFSET + LIMIT) : manifest.vehicles.slice(OFFSET),
+    olxFallbackVehicles,
   };
 }
 
@@ -124,6 +144,7 @@ function baseReport(manifest) {
     manifest: {
       totalReplacements: manifest.vehicles.length,
       selectedReplacements: LIMIT ? Math.min(LIMIT, Math.max(0, manifest.vehicles.length - OFFSET)) : Math.max(0, manifest.vehicles.length - OFFSET),
+      olxFallbackVehicles: manifest.olxFallbackVehicles?.length || 0,
       inactiveVehicles: manifest.inactiveVehicles.length,
     },
     shopify: {
@@ -1020,7 +1041,11 @@ async function synchronizeOlx(manifest, report) {
     return categoryConfigCache.get(categoryId);
   }
 
-  for (const vehicle of manifest.vehicles) {
+  const olxVehicles = [
+    ...manifest.vehicles,
+    ...(LIMIT === 0 ? (manifest.olxFallbackVehicles || []) : []),
+  ];
+  for (const vehicle of olxVehicles) {
     const existing = advertByExternal.get(vehicle.handle.toLowerCase());
     try {
       const { template, definitions } = await categoryConfigFor(vehicle);
