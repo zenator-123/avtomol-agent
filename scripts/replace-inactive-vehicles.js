@@ -738,7 +738,7 @@ async function categoryAttributes(categoryId) {
 }
 
 function allValues(definition) {
-  const values = definition?.values || definition?.options || [];
+  const values = definition?.validation?.values || definition?.values || definition?.options || [];
   const flattened = [];
   const visit = (value, parent = '') => {
     if (!value || typeof value !== 'object') return;
@@ -822,7 +822,11 @@ function makeAttributes(definitions, vehicle, template) {
   for (const definition of definitions) {
     const code = definition.code;
     const kind = attributeKind(definition);
-    const requiredAttribute = definition.required === true || definition.is_required === true;
+    const requiredAttribute = definition?.validation?.required === true
+      || definition.required === true
+      || definition.is_required === true;
+    const allowMultipleValues = definition?.validation?.allow_multiple_values === true
+      || definition.allow_multiple_values === true;
     let value = '';
     if (kind === 'year') value = String(vehicle.year || '');
     else if (kind === 'mileage') value = String(vehicle.mileage || '');
@@ -836,7 +840,10 @@ function makeAttributes(definitions, vehicle, template) {
       }
       value = clean(templateValue.value);
     }
-    if (value) attributes.push({ code, value });
+    if (value) {
+      if (allowMultipleValues) attributes.push({ code, values: [value] });
+      else attributes.push({ code, value });
+    }
     else if (requiredAttribute) unresolved.push({ code, label: definition.label || definition.name || '', kind });
   }
   return { attributes, unresolved };
