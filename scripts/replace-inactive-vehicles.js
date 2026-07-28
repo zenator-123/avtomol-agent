@@ -861,7 +861,7 @@ function olxPayload(vehicle, template, definitions) {
     external_id: vehicle.handle,
     contact: template.contact,
     location: template.location,
-    images: vehicle.images.slice(0, 20).map((image) => ({ url: image.url })),
+    images: vehicle.images.slice(0, 12).map((image) => ({ url: image.url })),
     price: {
       value: Number(vehicle.price),
       currency: 'EUR',
