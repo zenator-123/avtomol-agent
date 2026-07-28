@@ -36,6 +36,11 @@ on:
         required: true
         default: false
         type: boolean
+      allow_olx_refresh:
+        description: "Allow OLX OAuth refresh and create an encrypted token handoff"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -68,6 +73,9 @@ jobs:
       OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
       OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+      OLX_ALLOW_REFRESH: ${{ inputs.allow_olx_refresh }}
+      OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
+      OLX_TOKEN_HANDOFF_PATH: ${{ runner.temp }}/olx-refreshed-token.json
 
     steps:
       - name: Check out repository
@@ -81,11 +89,25 @@ jobs:
       - name: Validate or synchronize vehicle positions
         run: node scripts/replace-inactive-vehicles.js
 
+      - name: Encrypt refreshed OLX token
+        if: always()
+        shell: bash
+        run: |
+          if [ -f "$OLX_TOKEN_HANDOFF_PATH" ]; then
+            openssl enc -aes-256-cbc -salt -pbkdf2 \
+              -in "$OLX_TOKEN_HANDOFF_PATH" \
+              -out olx-refreshed-token.enc \
+              -pass env:OLX_TOKEN_TRANSFER_KEY
+            rm -f "$OLX_TOKEN_HANDOFF_PATH"
+          fi
+
       - name: Upload synchronization report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: replacement-vehicle-sync-${{ github.run_id }}
-          path: replacement-vehicle-sync-report.json
+          path: |
+            replacement-vehicle-sync-report.json
+            olx-refreshed-token.enc
           if-no-files-found: warn
           retention-days: 30

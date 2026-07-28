@@ -8,8 +8,10 @@ const CHANNEL = String(process.env.REPLACEMENT_CHANNEL || 'all').toLowerCase();
 const OFFSET = Math.max(0, Number(process.env.REPLACEMENT_OFFSET || 0));
 const LIMIT = Math.max(0, Number(process.env.REPLACEMENT_LIMIT || 0));
 const LOCAL_VALIDATE_ONLY = String(process.env.REPLACEMENT_LOCAL_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
+const ALLOW_OLX_REFRESH = String(process.env.OLX_ALLOW_REFRESH || 'false').toLowerCase() === 'true';
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
 const REPORT_PATH = process.env.REPLACEMENT_REPORT_PATH || 'replacement-vehicle-sync-report.json';
+const OLX_TOKEN_HANDOFF_PATH = process.env.OLX_TOKEN_HANDOFF_PATH || '';
 
 if (!['dry-run', 'apply'].includes(MODE)) throw new Error(`Invalid REPLACEMENT_MODE: ${MODE}`);
 if (!['all', 'shopify', 'facebook', 'olx'].includes(CHANNEL)) throw new Error(`Invalid REPLACEMENT_CHANNEL: ${CHANNEL}`);
@@ -135,6 +137,7 @@ function baseReport(manifest) {
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
       replacementsMatched: 0, created: 0, updated: 0, limited: 0,
+      tokenRefreshed: false,
       unresolvedAttributes: [], failures: [], results: [],
     },
   };
@@ -632,6 +635,7 @@ async function synchronizeFacebook(manifest, report) {
 }
 
 let olxToken = '';
+let olxTokenRefreshed = false;
 async function testOlxToken(token) {
   try {
     await request('https://www.olx.bg/api/partner/adverts?limit=1', {
@@ -651,7 +655,7 @@ async function getOlxToken() {
     olxToken = current;
     return olxToken;
   }
-  if (MODE === 'dry-run') {
+  if (MODE === 'dry-run' && !ALLOW_OLX_REFRESH) {
     throw new Error('OLX access token is expired or invalid. Dry-run deliberately did not rotate the refresh token; update OLX_ACCESS_TOKEN before applying changes.');
   }
   const { json } = await request('https://www.olx.bg/api/open/oauth/token', {
@@ -666,6 +670,20 @@ async function getOlxToken() {
     }),
   });
   if (!json?.access_token) throw new Error('OLX refresh did not return an access token.');
+  if (!json?.refresh_token) throw new Error('OLX refresh did not return a replacement refresh token.');
+  console.log(`::add-mask::${json.access_token}`);
+  console.log(`::add-mask::${json.refresh_token}`);
+  if (OLX_TOKEN_HANDOFF_PATH) {
+    await fs.writeFile(OLX_TOKEN_HANDOFF_PATH, `${JSON.stringify({
+      access_token: json.access_token,
+      refresh_token: json.refresh_token,
+      expires_in: json.expires_in,
+      token_type: json.token_type,
+      scope: json.scope,
+      generated_at: new Date().toISOString(),
+    })}\n`, { encoding: 'utf8', mode: 0o600 });
+  }
+  olxTokenRefreshed = true;
   olxToken = json.access_token;
   return olxToken;
 }
@@ -871,6 +889,7 @@ async function updateOlxVehicle(advert, payload) {
 
 async function synchronizeOlx(manifest, report) {
   const adverts = await listOlxAdverts();
+  report.olx.tokenRefreshed = olxTokenRefreshed;
   report.olx.advertsRead = adverts.length;
   const advertById = new Map(adverts.map((advert) => [Number(advert.id), advert]));
   const advertByExternal = new Map(adverts.map((advert) => [clean(advert.external_id).toLowerCase(), advert]));
