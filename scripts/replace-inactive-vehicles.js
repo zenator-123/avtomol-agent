@@ -157,6 +157,7 @@ function baseReport(manifest) {
       postsRead: 0, inactiveMatched: 0, removed: 0, replacementsMatched: 0,
       created: 0, updated: 0, readSource: 'facebook-feed',
       configuredPageId: '', tokenPageId: '', tokenPageName: '', pageIdentityMatches: false,
+      tokenDerivedFromManagedPages: false,
       failures: [], results: [],
     },
     olx: {
@@ -510,18 +511,42 @@ async function synchronizeShopify(manifest, report) {
   }
 }
 
-function facebookUrl(path) {
+let facebookToken = '';
+function facebookUrl(path, token = facebookToken || required('FACEBOOK_PAGE_ACCESS_TOKEN')) {
   const url = new URL(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${path}`);
-  url.searchParams.set('access_token', required('FACEBOOK_PAGE_ACCESS_TOKEN'));
+  url.searchParams.set('access_token', token);
   return url;
 }
 
 async function facebookIdentity() {
-  const { json } = await request(facebookUrl('me?fields=id,name').toString());
+  const sourceToken = required('FACEBOOK_PAGE_ACCESS_TOKEN');
+  const { json } = await request(facebookUrl('me?fields=id,name', sourceToken).toString());
   if (!json?.id || !json?.name) {
-    throw new Error('Facebook Page token did not return a Page identity.');
+    throw new Error('Facebook token did not return an identity.');
   }
-  return { id: String(json.id), name: String(json.name) };
+  if (/avtomol(?:\.com)?/i.test(String(json.name).replace(/\s+/g, ''))) {
+    facebookToken = sourceToken;
+    return { id: String(json.id), name: String(json.name), derivedFromManagedPages: false };
+  }
+  const { json: accounts } = await request(facebookUrl(
+    'me/accounts?fields=id,name,access_token&limit=100',
+    sourceToken,
+  ).toString());
+  const page = (accounts?.data || []).find((item) => (
+    item?.id
+    && item?.access_token
+    && /avtomol(?:\.com)?/i.test(String(item.name || '').replace(/\s+/g, ''))
+  ));
+  if (!page) {
+    throw new Error(`Safety stop: Facebook token belongs to "${json.name}" and does not expose the managed Page Avtomol.com.`);
+  }
+  facebookToken = String(page.access_token);
+  console.log(`::add-mask::${facebookToken}`);
+  return {
+    id: String(page.id),
+    name: String(page.name),
+    derivedFromManagedPages: true,
+  };
 }
 
 async function facebookPosts(pageId) {
@@ -551,7 +576,7 @@ async function deleteFacebookPost(postId) {
   if (MODE !== 'apply') return;
   await request(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${postId}`, {
     method: 'DELETE',
-    body: new URLSearchParams({ access_token: required('FACEBOOK_PAGE_ACCESS_TOKEN') }),
+    body: new URLSearchParams({ access_token: facebookToken || required('FACEBOOK_PAGE_ACCESS_TOKEN') }),
   });
 }
 
@@ -561,7 +586,7 @@ async function publishFacebookVehicle(vehicle, pageId) {
     url: vehicle.images[0].url,
     caption: facebookMessage(vehicle),
     published: 'true',
-    access_token: required('FACEBOOK_PAGE_ACCESS_TOKEN'),
+    access_token: facebookToken || required('FACEBOOK_PAGE_ACCESS_TOKEN'),
   });
   const { json } = await request(`https://graph.facebook.com/${FACEBOOK_API_VERSION}/${pageId}/photos`, { method: 'POST', body });
   return json;
@@ -573,7 +598,7 @@ async function updateFacebookVehicle(postId, vehicle) {
     method: 'POST',
     body: new URLSearchParams({
       message: facebookMessage(vehicle),
-      access_token: required('FACEBOOK_PAGE_ACCESS_TOKEN'),
+      access_token: facebookToken || required('FACEBOOK_PAGE_ACCESS_TOKEN'),
     }),
   });
 }
@@ -603,9 +628,7 @@ async function synchronizeFacebook(manifest, report) {
   report.facebook.tokenPageId = tokenPage.id;
   report.facebook.tokenPageName = tokenPage.name;
   report.facebook.pageIdentityMatches = tokenPage.id === configuredPageId;
-  if (!/avtomol(?:\.com)?/i.test(tokenPage.name.replace(/\s+/g, ''))) {
-    throw new Error(`Safety stop: Facebook token belongs to unexpected Page "${tokenPage.name}".`);
-  }
+  report.facebook.tokenDerivedFromManagedPages = tokenPage.derivedFromManagedPages;
   const pageId = tokenPage.id;
   let posts = [];
   let shopifyProducts = [];
