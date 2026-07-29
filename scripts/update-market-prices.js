@@ -83,14 +83,44 @@ async function getShopifyToken(shop) {
 
 async function shopifyGraphql(query, variables) {
   const shop = required('SHOPIFY_SHOP_DOMAIN').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const response = await fetch('https://' + shop + '/admin/api/' + API_VERSION + '/graphql.json', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await getShopifyToken(shop) },
-    body: JSON.stringify({ query, variables: variables || {} }),
-  });
-  const json = await response.json();
-  if (!response.ok || json.errors) throw new Error('Shopify request failed: ' + response.status + ' ' + JSON.stringify(json.errors || json));
-  return json.data;
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    const response = await fetch('https://' + shop + '/admin/api/' + API_VERSION + '/graphql.json', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await getShopifyToken(shop) },
+      body: JSON.stringify({ query, variables: variables || {} }),
+    });
+    const json = await response.json();
+    const errors = json.errors || [];
+    const throttled = errors.some((error) => error?.extensions?.code === 'THROTTLED');
+    if (throttled && attempt < 12) {
+      const throttle = json?.extensions?.cost?.throttleStatus || {};
+      const restoreRate = Math.max(1, Number(throttle.restoreRate || 50));
+      const requested = Math.max(
+        1,
+        Number(json?.extensions?.cost?.requestedQueryCost || 100),
+      );
+      const available = Math.max(0, Number(throttle.currentlyAvailable || 0));
+      const waitMs = Math.min(
+        30000,
+        Math.max(
+          1000,
+          Math.ceil(((requested - available) / restoreRate) * 1000) + 500,
+        ),
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitMs));
+      continue;
+    }
+    if (!response.ok || errors.length) {
+      throw new Error(
+        'Shopify request failed: '
+          + response.status
+          + ' '
+          + JSON.stringify(errors.length ? errors : json),
+      );
+    }
+    return json.data;
+  }
+  throw new Error('Shopify request remained throttled after 12 attempts.');
 }
 
 async function listShopifyProducts() {
