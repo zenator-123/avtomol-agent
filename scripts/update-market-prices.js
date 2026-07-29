@@ -192,11 +192,54 @@ function isFacebookAuthError(error) {
   return /access token|session has expired|oauth|error validating access token/i.test(String(error?.message || error || ''));
 }
 
-async function listFacebookPosts() {
+let facebookPageToken = '';
+
+async function resolveFacebookPage() {
   const token = required('FACEBOOK_PAGE_ACCESS_TOKEN');
+  const configuredPageId = required('FACEBOOK_PAGE_ID');
   const me = await facebookJson(facebookUrl('me?fields=id,name', token));
+  if (String(me.id) === configuredPageId) {
+    facebookPageToken = token;
+    return {
+      id: String(me.id),
+      name: me.name || '',
+      configuredPageId,
+      tokenDerivedFromManagedPages: false,
+    };
+  }
+
+  const managedPages = [];
+  let next = facebookUrl('me/accounts?fields=id,name,access_token&limit=100', token).toString();
+  let pages = 0;
+  while (next && pages < 20) {
+    const json = await facebookJson(next);
+    managedPages.push(...(json.data || []));
+    next = json.paging?.next || '';
+    pages += 1;
+  }
+  const page = managedPages.find((item) => String(item.id) === configuredPageId);
+  if (!page?.access_token) {
+    throw new Error(
+      'Facebook identity mismatch: configured page '
+        + configuredPageId
+        + ' is not available to token identity '
+        + String(me.id || 'unknown')
+        + '.'
+    );
+  }
+  facebookPageToken = page.access_token;
+  return {
+    id: String(page.id),
+    name: page.name || '',
+    configuredPageId,
+    tokenDerivedFromManagedPages: true,
+  };
+}
+
+async function listFacebookPosts() {
+  const page = await resolveFacebookPage();
   const posts = [];
-  let next = facebookUrl(me.id + '/feed?fields=id,message,permalink_url,created_time&limit=100', token).toString();
+  let next = facebookUrl(page.id + '/feed?fields=id,message,permalink_url,created_time&limit=100', facebookPageToken).toString();
   let pages = 0;
   while (next && pages < 100) {
     const json = await facebookJson(next);
@@ -204,17 +247,17 @@ async function listFacebookPosts() {
     next = json.paging?.next || '';
     pages += 1;
   }
-  return { page: me, posts };
+  return { page, posts };
 }
 
 async function updateFacebookPost(post, plan) {
-  const token = required('FACEBOOK_PAGE_ACCESS_TOKEN');
+  if (!facebookPageToken) throw new Error('Facebook page token was not resolved.');
   const message = replaceEurPrice(post.message, plan.newPrice);
   const changed = Boolean(post.message) && message !== post.message;
   if (APPLY && changed) {
     await facebookJson('https://graph.facebook.com/' + FB_VERSION + '/' + post.id, {
       method: 'POST',
-      body: new URLSearchParams({ message, access_token: token }),
+      body: new URLSearchParams({ message, access_token: facebookPageToken }),
     });
   }
   return { changed };
