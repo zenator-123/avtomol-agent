@@ -31,6 +31,7 @@ jobs:
       OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: "false"
+      OLX_UPDATE_EXISTING: "true"
 
     steps:
       - name: Check out repository

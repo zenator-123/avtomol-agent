@@ -43,6 +43,11 @@ on:
         required: true
         default: false
         type: boolean
+      olx_update_existing:
+        description: "Update OLX adverts that already match a stock number"
+        required: true
+        default: true
+        type: boolean
       facebook_create_limit:
         description: "Maximum missing Facebook posts to create; 0 means all"
         required: true
@@ -88,6 +93,7 @@ jobs:
       OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: ${{ inputs.allow_olx_refresh }}
+      OLX_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'true' || inputs.olx_update_existing }}
       OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
       OLX_TOKEN_HANDOFF_PATH: ${{ github.workspace }}/olx-refreshed-token.json
 

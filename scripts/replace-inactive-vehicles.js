@@ -9,6 +9,7 @@ const OFFSET = Math.max(0, Number(process.env.REPLACEMENT_OFFSET || 0));
 const LIMIT = Math.max(0, Number(process.env.REPLACEMENT_LIMIT || 0));
 const LOCAL_VALIDATE_ONLY = String(process.env.REPLACEMENT_LOCAL_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const ALLOW_OLX_REFRESH = String(process.env.OLX_ALLOW_REFRESH || 'false').toLowerCase() === 'true';
+const OLX_UPDATE_EXISTING = String(process.env.OLX_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
 const FACEBOOK_CREATE_LIMIT = Math.max(0, Number(process.env.FACEBOOK_CREATE_LIMIT || 0));
 const FACEBOOK_UPDATE_EXISTING = String(process.env.FACEBOOK_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
@@ -165,7 +166,8 @@ function baseReport(manifest) {
     },
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
-      replacementsMatched: 0, created: 0, updated: 0, skippedUnresolved: 0, limited: 0,
+      replacementsMatched: 0, created: 0, updated: 0, existingSkipped: 0,
+      skippedUnresolved: 0, limited: 0,
       tokenRefreshed: false,
       unresolvedAttributes: [], failures: [], results: [],
     },
@@ -1164,10 +1166,15 @@ async function synchronizeOlx(manifest, report) {
       }
       if (existing) {
         report.olx.replacementsMatched += 1;
-        const full = await readOlxAdvert(existing.id);
-        await updateOlxVehicle(full, payload);
-        report.olx.updated += 1;
-        report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'update-replacement' });
+        if (OLX_UPDATE_EXISTING) {
+          const full = await readOlxAdvert(existing.id);
+          await updateOlxVehicle(full, payload);
+          report.olx.updated += 1;
+          report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'update-replacement' });
+        } else {
+          report.olx.existingSkipped += 1;
+          report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'retain-existing' });
+        }
       } else {
         const result = await createOlxVehicle(payload);
         const advert = result?.data || result;
@@ -1179,7 +1186,7 @@ async function synchronizeOlx(manifest, report) {
       report.olx.failures.push({ stock: vehicle.stock, action: 'replace', error: error.message });
     }
     if ((index + 1) % 25 === 0 || index + 1 === olxVehicles.length) {
-      console.log(`OLX progress ${index + 1}/${olxVehicles.length}: updated=${report.olx.updated}, created=${report.olx.created}, skipped=${report.olx.skippedUnresolved}, failures=${report.olx.failures.length}`);
+      console.log(`OLX progress ${index + 1}/${olxVehicles.length}: updated=${report.olx.updated}, retained=${report.olx.existingSkipped}, created=${report.olx.created}, skipped=${report.olx.skippedUnresolved}, failures=${report.olx.failures.length}`);
     }
   }
 }
