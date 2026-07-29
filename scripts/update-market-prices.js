@@ -239,7 +239,7 @@ async function resolveFacebookPage() {
 async function listFacebookPosts() {
   const page = await resolveFacebookPage();
   const posts = [];
-  let next = facebookUrl(page.id + '/feed?fields=id,message,permalink_url,created_time&limit=100', facebookPageToken).toString();
+  let next = facebookUrl(page.id + '/published_posts?fields=id,message,permalink_url,created_time&limit=100', facebookPageToken).toString();
   let pages = 0;
   while (next && pages < 100) {
     const json = await facebookJson(next);
