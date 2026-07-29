@@ -165,7 +165,7 @@ function baseReport(manifest) {
     },
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
-      replacementsMatched: 0, created: 0, updated: 0, limited: 0,
+      replacementsMatched: 0, created: 0, updated: 0, skippedUnresolved: 0, limited: 0,
       tokenRefreshed: false,
       unresolvedAttributes: [], failures: [], results: [],
     },
@@ -1146,14 +1146,20 @@ async function synchronizeOlx(manifest, report) {
     ...manifest.vehicles,
     ...(LIMIT === 0 ? (manifest.olxFallbackVehicles || []) : []),
   ];
-  for (const vehicle of olxVehicles) {
+  for (const [index, vehicle] of olxVehicles.entries()) {
     const existing = advertByExternal.get(vehicle.handle.toLowerCase());
     try {
       const { template, definitions } = await categoryConfigFor(vehicle);
       const { payload, unresolved } = olxPayload(vehicle, template, definitions);
       if (unresolved.length) {
         report.olx.unresolvedAttributes.push({ stock: vehicle.stock, unresolved });
-        report.olx.failures.push({ stock: vehicle.stock, action: 'replace', error: `Unresolved required OLX attributes: ${unresolved.map((item) => item.code).join(', ')}` });
+        report.olx.skippedUnresolved += 1;
+        report.olx.results.push({
+          stock: vehicle.stock,
+          action: 'skip-unresolved-attributes',
+          unresolved: unresolved.map((item) => item.code),
+        });
+        console.warn(`::warning title=OLX listing skipped::${vehicle.stock} has no exact OLX value for: ${unresolved.map((item) => item.code).join(', ')}.`);
         continue;
       }
       if (existing) {
@@ -1171,6 +1177,9 @@ async function synchronizeOlx(manifest, report) {
       }
     } catch (error) {
       report.olx.failures.push({ stock: vehicle.stock, action: 'replace', error: error.message });
+    }
+    if ((index + 1) % 25 === 0 || index + 1 === olxVehicles.length) {
+      console.log(`OLX progress ${index + 1}/${olxVehicles.length}: updated=${report.olx.updated}, created=${report.olx.created}, skipped=${report.olx.skippedUnresolved}, failures=${report.olx.failures.length}`);
     }
   }
 }

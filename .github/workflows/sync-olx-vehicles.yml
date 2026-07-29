@@ -1,0 +1,54 @@
+name: Update Avtomol vehicles in OLX
+
+on:
+  schedule:
+    - cron: "37 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replace-inactive-avtomol-vehicles
+  cancel-in-progress: false
+
+jobs:
+  olx:
+    name: Remove sold and update current OLX vehicles
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      REPLACEMENT_MODE: apply
+      REPLACEMENT_CHANNEL: olx
+      REPLACEMENT_OFFSET: "0"
+      REPLACEMENT_LIMIT: "0"
+      REPLACEMENT_LOCAL_VALIDATE_ONLY: "false"
+      REPLACEMENT_MANIFEST_PATH: data/replacement-vehicles-2026-07-27.enc.json
+      REPLACEMENT_REPORT_PATH: replacement-vehicle-sync-report.json
+      REPLACEMENT_MANIFEST_KEY: ${{ secrets.REPLACEMENT_MANIFEST_KEY }}
+      OLX_ACCESS_TOKEN: ${{ secrets.OLX_ACCESS_TOKEN }}
+      OLX_REFRESH_TOKEN: ${{ secrets.OLX_REFRESH_TOKEN }}
+      OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
+      OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
+      OLX_ALLOW_REFRESH: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Synchronize OLX vehicle listings
+        run: node scripts/replace-inactive-vehicles.js
+
+      - name: Upload synchronization report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: olx-vehicle-sync-${{ github.run_id }}
+          path: replacement-vehicle-sync-report.json
+          if-no-files-found: warn
+          retention-days: 30
