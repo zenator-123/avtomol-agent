@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "37 3 * * *"
   workflow_dispatch:
+    inputs:
+      update_existing:
+        description: "Update OLX adverts that already match a stock number"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,7 +21,7 @@ concurrency:
 jobs:
   olx:
     name: Remove sold and update current OLX vehicles
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     timeout-minutes: 360
     env:
       REPLACEMENT_MODE: apply
@@ -31,7 +37,7 @@ jobs:
       OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: "false"
-      OLX_UPDATE_EXISTING: "true"
+      OLX_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'true' || inputs.update_existing }}
 
     steps:
       - name: Check out repository

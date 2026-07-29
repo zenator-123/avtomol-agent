@@ -822,6 +822,7 @@ async function olxRequest(path, options = {}) {
       Authorization: `Bearer ${await getOlxToken()}`,
       Version: '2.0',
       Accept: 'application/json',
+      'User-Agent': 'Avtomol-OlxSync/1.0 (+https://avtomol.com)',
       ...(options.headers || {}),
     },
   });
