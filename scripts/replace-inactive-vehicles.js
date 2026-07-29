@@ -167,9 +167,9 @@ function baseReport(manifest) {
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
       replacementsMatched: 0, created: 0, updated: 0, existingSkipped: 0,
-      skippedUnresolved: 0, limited: 0,
+      skippedUnresolved: 0, deferred: 0, limited: 0,
       tokenRefreshed: false,
-      unresolvedAttributes: [], failures: [], results: [],
+      unresolvedAttributes: [], deferredItems: [], failures: [], results: [],
     },
   };
 }
@@ -1184,10 +1184,27 @@ async function synchronizeOlx(manifest, report) {
         report.olx.results.push({ stock: vehicle.stock, advertId: advert?.id, status: advert?.status, action: 'create-replacement' });
       }
     } catch (error) {
-      report.olx.failures.push({ stock: vehicle.stock, action: 'replace', error: error.message });
+      const deferredCreate = !existing
+        && error.status === 403
+        && /cloudfront|request blocked|request could not be satisfied/i.test(error.message);
+      if (deferredCreate) {
+        report.olx.deferred += 1;
+        report.olx.deferredItems.push({
+          stock: vehicle.stock,
+          title: vehicle.title,
+          handle: vehicle.handle,
+          price: Number(vehicle.price),
+          imageCount: vehicle.images.length,
+          reason: 'OLX CloudFront temporarily blocked the create request with HTTP 403.',
+        });
+        report.olx.results.push({ stock: vehicle.stock, action: 'defer-create-cloudfront-403' });
+        console.warn(`::warning title=OLX create deferred::${vehicle.stock} will be retried on the next daily run after an OLX CloudFront HTTP 403.`);
+      } else {
+        report.olx.failures.push({ stock: vehicle.stock, action: 'replace', error: error.message });
+      }
     }
     if ((index + 1) % 25 === 0 || index + 1 === olxVehicles.length) {
-      console.log(`OLX progress ${index + 1}/${olxVehicles.length}: updated=${report.olx.updated}, retained=${report.olx.existingSkipped}, created=${report.olx.created}, skipped=${report.olx.skippedUnresolved}, failures=${report.olx.failures.length}`);
+      console.log(`OLX progress ${index + 1}/${olxVehicles.length}: updated=${report.olx.updated}, retained=${report.olx.existingSkipped}, created=${report.olx.created}, deferred=${report.olx.deferred}, skipped=${report.olx.skippedUnresolved}, failures=${report.olx.failures.length}`);
     }
   }
 }
