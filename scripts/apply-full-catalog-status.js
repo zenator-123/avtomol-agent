@@ -39,6 +39,7 @@ async function runPool(items, worker) {
 async function main() {
   const manifest = validateManifest(await decryptManifest());
   const sold = new Set(manifest.soldOrUnavailableStocks);
+  const stillAvailable = new Set(manifest.stillAvailableStocks);
   const replacements = new Set(manifest.newEligibleStocks);
   const products = await listShopifyProducts();
 
@@ -46,12 +47,25 @@ async function main() {
   const draftQueue = [];
   let soldMatchedProducts = 0;
   let soldAlreadyHidden = 0;
+  let stillAvailableMatchedProducts = 0;
+  let stillAvailableAlreadyActive = 0;
   let replacementMatchedProducts = 0;
   let replacementAlreadyActive = 0;
 
   for (const product of products) {
     const stock = productStock(product);
     if (!stock) continue;
+    if (stillAvailable.has(stock)) {
+      stillAvailableMatchedProducts += 1;
+      if (product.status === 'ACTIVE') stillAvailableAlreadyActive += 1;
+      else activationQueue.push({
+        product,
+        stock,
+        targetStatus: 'ACTIVE',
+        action: 'activate-still-available',
+      });
+      continue;
+    }
     if (replacements.has(stock)) {
       replacementMatchedProducts += 1;
       if (product.status === 'ACTIVE') replacementAlreadyActive += 1;
@@ -77,6 +91,7 @@ async function main() {
     concurrency: CONCURRENCY,
     productsRead: products.length,
     manifest: {
+      stillAvailableStocks: manifest.stillAvailableStocks.length,
       soldOrUnavailableStocks: manifest.soldOrUnavailableStocks.length,
       newEligibleStocks: manifest.newEligibleStocks.length,
     },
@@ -84,20 +99,31 @@ async function main() {
       soldMatchedProducts,
       soldAlreadyHidden,
       soldPendingDraft: draftQueue.length,
+      stillAvailableMatchedProducts,
+      stillAvailableAlreadyActive,
+      stillAvailablePendingActivation: activationQueue
+        .filter((item) => item.action === 'activate-still-available').length,
       replacementMatchedProducts,
       replacementAlreadyActive,
-      replacementPendingActivation: activationQueue.length,
+      replacementPendingActivation: activationQueue
+        .filter((item) => item.action === 'activate-replacement').length,
       replacementMissingProducts: manifest.newEligibleStocks.length
         - new Set(products.map(productStock).filter((stock) => replacements.has(stock))).size,
     },
     selected: {
       total: selected.length,
-      activations: selected.filter((item) => item.action === 'activate-replacement').length,
+      activations: selected.filter((item) => item.targetStatus === 'ACTIVE').length,
+      stillAvailableActivations: selected
+        .filter((item) => item.action === 'activate-still-available').length,
+      replacementActivations: selected
+        .filter((item) => item.action === 'activate-replacement').length,
       drafts: selected.filter((item) => item.action === 'draft-sold').length,
     },
     applied: {
       total: 0,
       activations: 0,
+      stillAvailableActivations: 0,
+      replacementActivations: 0,
       drafts: 0,
     },
     failures: [],
@@ -114,8 +140,16 @@ async function main() {
     try {
       await setProductStatus(item.product, item.targetStatus);
       report.applied.total += 1;
-      if (item.action === 'activate-replacement') report.applied.activations += 1;
-      else report.applied.drafts += 1;
+      if (item.targetStatus === 'ACTIVE') {
+        report.applied.activations += 1;
+        if (item.action === 'activate-still-available') {
+          report.applied.stillAvailableActivations += 1;
+        } else {
+          report.applied.replacementActivations += 1;
+        }
+      } else {
+        report.applied.drafts += 1;
+      }
       report.results.push({
         stock: item.stock,
         productId: item.product.id,
@@ -144,7 +178,20 @@ async function main() {
   });
 
   report.remainingAfterRun = {
-    pendingActivations: Math.max(0, activationQueue.length - report.applied.activations),
+    pendingActivations: Math.max(
+      0,
+      activationQueue.length - report.applied.activations,
+    ),
+    pendingStillAvailableActivations: Math.max(
+      0,
+      activationQueue.filter((item) => item.action === 'activate-still-available').length
+        - report.applied.stillAvailableActivations,
+    ),
+    pendingReplacementActivations: Math.max(
+      0,
+      activationQueue.filter((item) => item.action === 'activate-replacement').length
+        - report.applied.replacementActivations,
+    ),
     pendingDrafts: Math.max(0, draftQueue.length - report.applied.drafts),
   };
   await fs.writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
