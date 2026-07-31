@@ -11,6 +11,9 @@ const MANIFEST_PATH = process.env.FULL_REPLACEMENT_MANIFEST_PATH
 const REPORT_PATH = process.env.FULL_REPLACEMENT_REPORT_PATH
   || 'full-replacement-catalog-import-report.json';
 const LOCAL_VALIDATE_ONLY = process.env.FULL_REPLACEMENT_LOCAL_VALIDATE_ONLY === 'true';
+const PROTECTED_STOCKS = new Set(['FF94775']);
+const REQUIRED_CTA = 'ПРЕДЛАГА СЕ ПО ПОРЪЧКА — ОБАДЕТЕ СЕ НА 0876778357 ИЛИ ИЗПРАТЕТЕ ПРОДУКТОВИЯ КОД НА VIBER ЗА ПРОВЕРКА НА АКТУАЛНА НАЛИЧНОСТ И СХОДНИ ВАРИАНТИ.';
+const NON_VEHICLE_HINT = /авточаст|части|гуми|джанти|масла|акумулатор|аксесоар|филтри|спирачки|окачване|ремъци|консуматив/i;
 
 if (!['dry-run', 'apply'].includes(MODE)) throw new Error(`Invalid FULL_REPLACEMENT_MODE: ${MODE}`);
 
@@ -69,6 +72,16 @@ function validateManifest(manifest) {
   const stocks = new Set();
   const handles = new Set();
   for (const vehicle of manifest.vehicles) {
+    const identity = [
+      vehicle.title,
+      vehicle.handle,
+      vehicle.category,
+      vehicle.productType,
+      vehicle.itemType,
+    ].filter(Boolean).join(' ');
+    if (NON_VEHICLE_HINT.test(identity)) {
+      throw new Error(`Safety stop: ${vehicle.stock || 'unknown'} is not an automobile record.`);
+    }
     if (!/^[A-Z]{2}\d{5}$/.test(vehicle.stock) || stocks.has(vehicle.stock)) {
       throw new Error(`Invalid or duplicate stock: ${vehicle.stock}`);
     }
@@ -166,6 +179,31 @@ async function productByHandle(handle) {
   return data.products.nodes.find(product => product.handle === handle) || null;
 }
 
+async function productByStockOrExternalId(vehicle) {
+  const needles = [vehicle.stock, clean(vehicle.externalId)].filter(Boolean);
+  for (const needle of needles) {
+    const data = await shopifyGraphql(`query FullReplacementProductByStock($query: String!) {
+      products(first: 50, query: $query) { nodes { ${productFields} } }
+    }`, { query: needle });
+    const match = data.products.nodes.find(product => (
+      stockFrom(product.incoming?.value || product.variants?.nodes?.[0]?.sku) === vehicle.stock
+      || product.handle === vehicle.handle
+    ));
+    if (match) return match;
+  }
+  return null;
+}
+
+async function findExistingProduct(vehicle) {
+  if (vehicle.existingProduct?.id) {
+    const byId = await productById(vehicle.existingProduct.id);
+    if (byId) return byId;
+  }
+  const byHandle = await productByHandle(vehicle.handle);
+  if (byHandle) return byHandle;
+  return productByStockOrExternalId(vehicle);
+}
+
 function productIsCurrent(product, vehicle) {
   if (!product || product.status !== 'ACTIVE') return false;
   if (stockFrom(product.incoming?.value || product.variants?.nodes?.[0]?.sku) !== vehicle.stock) return false;
@@ -213,6 +251,7 @@ async function setVariant(productId, variantId, vehicle) {
       inventoryItem: {
         sku: vehicle.stock,
         requiresShipping: true,
+        tracked: true,
       },
     }],
   });
@@ -222,10 +261,15 @@ async function setVariant(productId, variantId, vehicle) {
 }
 
 function productInput(vehicle, id = undefined) {
+  const bodyWithoutDuplicateCta = String(vehicle.bodyHtml || '')
+    .split(REQUIRED_CTA)
+    .join('')
+    .trim();
+  const descriptionHtml = `${bodyWithoutDuplicateCta}<p><strong>${REQUIRED_CTA}</strong></p>`;
   const input = {
     title: vehicle.title,
     handle: vehicle.handle,
-    descriptionHtml: vehicle.bodyHtml,
+    descriptionHtml,
     vendor: 'Avtomol.com',
     productType: 'Автомобил',
     status: 'ACTIVE',
@@ -254,7 +298,7 @@ function productInput(vehicle, id = undefined) {
 }
 
 async function createProduct(vehicle, publicationIds) {
-  const media = vehicle.images.slice(0, 30).map((image, index) => ({
+  const media = vehicle.images.slice(0, 250).map((image, index) => ({
     originalSource: image.url,
     mediaContentType: 'IMAGE',
     alt: image.alt || `${vehicle.title} – снимка ${index + 1}`,
@@ -279,22 +323,31 @@ async function createProduct(vehicle, publicationIds) {
   return product;
 }
 
-async function updateProduct(product, vehicle, publicationIds) {
-  const data = await shopifyGraphql(`mutation UpdateFullReplacement($product: ProductUpdateInput!) {
-    productUpdate(product: $product) {
-      product { id handle status variants(first: 1) { nodes { id } } }
-      userErrors { field message }
-    }
-  }`, { product: productInput(vehicle, product.id) });
-  if (data.productUpdate.userErrors.length) {
-    throw new Error(`Product update failed: ${JSON.stringify(data.productUpdate.userErrors)}`);
-  }
-  const updated = data.productUpdate.product;
-  const variantId = updated.variants.nodes[0]?.id || product.variants?.nodes?.[0]?.id;
-  if (!variantId) throw new Error('Updated product has no variant.');
-  await setVariant(updated.id, variantId, vehicle);
-  await publishProduct(updated.id, publicationIds);
-  return updated;
+async function publicQa(vehicle, handle) {
+  const url = `https://avtomol.com/products/${handle}`;
+  const response = await fetch(url, { redirect: 'follow' });
+  const html = await response.text();
+  const visibleHtml = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '');
+  const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)/i)?.[1]
+    || html.match(/<link[^>]+href=["']([^"']+)["'][^>]+rel=["']canonical["']/i)?.[1]
+    || '';
+  const ctaCount = visibleHtml.split(REQUIRED_CTA).length - 1;
+  return {
+    url,
+    status: response.status,
+    stockVisible: html.includes(vehicle.stock),
+    ctaCount,
+    canonical,
+    canonicalSelf: canonical === url,
+    indexable: !/<meta[^>]+name=["']robots["'][^>]+content=["'][^"']*noindex/i.test(html),
+    passed: response.status === 200
+      && html.includes(vehicle.stock)
+      && ctaCount === 1
+      && canonical === url
+      && !/<meta[^>]+name=["']robots["'][^>]+content=["'][^"']*noindex/i.test(html),
+  };
 }
 
 async function main() {
@@ -327,6 +380,12 @@ async function main() {
     selected: 0,
     created: 0,
     updated: 0,
+    duplicatesSkipped: 0,
+    protectedSkipped: 0,
+    deleted: 0,
+    archived: 0,
+    overwritten: 0,
+    purchases: 0,
     deferredByDailyVariantLimit: 0,
     failures: [],
     results: [],
@@ -335,27 +394,36 @@ async function main() {
   for (const vehicle of manifest.vehicles) {
     if (pending.length >= LIMIT) break;
     report.scanned += 1;
-    let product = null;
     try {
-      product = vehicle.existingProduct?.id
-        ? await productById(vehicle.existingProduct.id)
-        : await productByHandle(vehicle.handle);
-      if (productIsCurrent(product, vehicle)) {
-        report.alreadyCurrent += 1;
+      if (PROTECTED_STOCKS.has(vehicle.stock)) {
+        report.protectedSkipped += 1;
+        report.results.push({ stock: vehicle.stock, handle: vehicle.handle, action: 'protected-skip' });
         continue;
       }
-      pending.push({ vehicle, product });
+      const product = await findExistingProduct(vehicle);
+      if (product) {
+        report.duplicatesSkipped += 1;
+        if (productIsCurrent(product, vehicle)) report.alreadyCurrent += 1;
+        report.results.push({
+          stock: vehicle.stock,
+          handle: vehicle.handle,
+          productId: product.id,
+          action: 'existing-skip-no-update',
+        });
+        continue;
+      }
+      pending.push({ vehicle });
     } catch (error) {
       report.failures.push({ stock: vehicle.stock, action: 'inspect', error: error.message });
     }
   }
   report.selected = pending.length;
-  for (const { vehicle, product } of pending) {
+  for (const { vehicle } of pending) {
     if (MODE !== 'apply') {
       report.results.push({
         stock: vehicle.stock,
         handle: vehicle.handle,
-        action: product ? 'would-update' : 'would-create',
+        action: 'would-create',
         price: vehicle.price,
         landedCost: vehicle.landedCost,
         expectedNetProfit: vehicle.expectedNetProfit,
@@ -363,38 +431,27 @@ async function main() {
       continue;
     }
     try {
-      if (product) {
-        const updated = await updateProduct(
-          product,
-          vehicle,
-          publications.targets.map(publication => publication.id),
-        );
-        report.updated += 1;
-        report.results.push({
-          stock: vehicle.stock,
-          productId: updated.id,
-          handle: vehicle.handle,
-          action: 'updated',
-          price: vehicle.price,
-          expectedNetProfit: vehicle.expectedNetProfit,
-        });
-      } else {
-        const created = await createProduct(
-          vehicle,
-          publications.targets.map(publication => publication.id),
-        );
-        report.created += 1;
-        report.results.push({
-          stock: vehicle.stock,
-          productId: created.id,
-          handle: created.handle,
-          action: 'created',
-          price: vehicle.price,
-          expectedNetProfit: vehicle.expectedNetProfit,
-        });
-      }
+      const created = await createProduct(
+        vehicle,
+        publications.targets.map(publication => publication.id),
+      );
+      report.created += 1;
+      const qa = await publicQa(vehicle, created.handle);
+      report.results.push({
+        stock: vehicle.stock,
+        productId: created.id,
+        handle: created.handle,
+        publicUrl: qa.url,
+        action: 'created',
+        price: vehicle.price,
+        expectedNetProfit: vehicle.expectedNetProfit,
+        imagesAvailable: vehicle.images.length,
+        imagesSubmitted: Math.min(vehicle.images.length, 250),
+        seoQa: qa,
+      });
+      if (!qa.passed) throw new Error(`Public QA failed for ${vehicle.stock}: ${JSON.stringify(qa)}`);
     } catch (error) {
-      if (!product && isDailyVariantQuotaError(error)) {
+      if (isDailyVariantQuotaError(error)) {
         report.deferredByDailyVariantLimit = manifest.vehicles.length
           - report.alreadyCurrent
           - report.created
@@ -414,9 +471,10 @@ async function main() {
       report.failures.push({
         stock: vehicle.stock,
         handle: vehicle.handle,
-        action: product ? 'update' : 'create',
+        action: 'create',
         error: error.message,
       });
+      break;
     }
     await fs.writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
   }
