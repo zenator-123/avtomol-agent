@@ -1,4 +1,4 @@
-name: Import full verified replacement catalog
+name: Create-only verified AUTO1 automobiles
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
           - dry-run
           - apply
       batch_limit:
-        description: "Maximum vehicles to create/update"
+        description: "Maximum new automobiles to create"
         required: true
         default: "25"
         type: string
@@ -45,7 +45,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Import verified replacement batch
+      - name: Create verified new automobile batch
         run: node scripts/import-full-replacement-catalog.js
 
       - name: Upload import report
@@ -56,4 +56,3 @@ jobs:
           path: full-replacement-catalog-import-report.json
           if-no-files-found: warn
           retention-days: 30
-
