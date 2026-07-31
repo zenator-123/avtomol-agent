@@ -1,8 +1,6 @@
 name: Replace inactive Avtomol vehicles
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -54,9 +52,9 @@ on:
         default: "20"
         type: string
       facebook_update_existing:
-        description: "Update Facebook posts that already match a stock number"
+        description: "Replace incomplete one-photo posts and update complete Facebook galleries"
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
@@ -72,13 +70,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 360
     env:
-      REPLACEMENT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
-      REPLACEMENT_CHANNEL: ${{ github.event_name == 'schedule' && 'facebook' || inputs.channel }}
-      REPLACEMENT_OFFSET: ${{ github.event_name == 'schedule' && '0' || inputs.offset }}
-      REPLACEMENT_LIMIT: ${{ github.event_name == 'schedule' && '0' || inputs.limit }}
-      REPLACEMENT_LOCAL_VALIDATE_ONLY: ${{ github.event_name == 'schedule' && 'false' || inputs.local_validate_only }}
-      FACEBOOK_CREATE_LIMIT: ${{ github.event_name == 'schedule' && '20' || inputs.facebook_create_limit }}
-      FACEBOOK_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'false' || inputs.facebook_update_existing }}
+      REPLACEMENT_MODE: ${{ inputs.mode }}
+      REPLACEMENT_CHANNEL: ${{ inputs.channel }}
+      REPLACEMENT_OFFSET: ${{ inputs.offset }}
+      REPLACEMENT_LIMIT: ${{ inputs.limit }}
+      REPLACEMENT_LOCAL_VALIDATE_ONLY: ${{ inputs.local_validate_only }}
+      FACEBOOK_CREATE_LIMIT: ${{ inputs.facebook_create_limit }}
+      FACEBOOK_UPDATE_EXISTING: ${{ inputs.facebook_update_existing }}
+      FACEBOOK_PHOTOS_PER_POST: "10"
       REPLACEMENT_MANIFEST_PATH: data/replacement-vehicles-2026-07-27.enc.json
       REPLACEMENT_REPORT_PATH: replacement-vehicle-sync-report.json
       REPLACEMENT_MANIFEST_KEY: ${{ secrets.REPLACEMENT_MANIFEST_KEY }}
@@ -93,7 +92,7 @@ jobs:
       OLX_CLIENT_ID: ${{ secrets.OLX_CLIENT_ID }}
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: ${{ inputs.allow_olx_refresh }}
-      OLX_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'true' || inputs.olx_update_existing }}
+      OLX_UPDATE_EXISTING: ${{ inputs.olx_update_existing }}
       OLX_TOKEN_TRANSFER_KEY: ${{ secrets.OLX_TOKEN_TRANSFER_KEY }}
       OLX_TOKEN_HANDOFF_PATH: ${{ github.workspace }}/olx-refreshed-token.json
 
@@ -131,3 +130,4 @@ jobs:
             olx-refreshed-token.enc
           if-no-files-found: warn
           retention-days: 30
+

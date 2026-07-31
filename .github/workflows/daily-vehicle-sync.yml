@@ -2,8 +2,8 @@ name: Avtomol daily vehicle sync
 
 on:
   schedule:
-    # Both UTC equivalents of 22:00 Europe/Sofia; the guard handles DST.
-    - cron: '0 19,20 * * *'
+    # Both UTC equivalents of 21:00 Europe/Sofia; the guard handles DST.
+    - cron: '0 18,19 * * *'
   workflow_dispatch:
     inputs:
       apply_changes:
@@ -38,19 +38,20 @@ jobs:
       AUTO1_REQUIRED_CATALOG_SIZE: '25000'
       ALLOW_DELETIONS: 'false'
       ALLOW_ADDITIONS: 'false'
+      ALLOW_UPDATES: 'false'
       FACEBOOK_STRICT: 'true'
       VEHICLE_SYNC_REPORT_PATH: daily-vehicle-sync-report.json
       VEHICLE_KNOWLEDGE_PATH: vehicle-knowledge.json
     steps:
-      - name: Check that it is 22:00 in Sofia
+      - name: Check that it is 21:00 in Sofia
         id: sofia_time
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(TZ=Europe/Sofia date +%H)" = "22" ]; then
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(TZ=Europe/Sofia date +%H)" = "21" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping duplicate UTC schedule; it is not 22:00 in Sofia."
+            echo "Skipping duplicate UTC schedule; it is not 21:00 in Sofia."
           fi
       - uses: actions/checkout@v7
         if: steps.sofia_time.outputs.run == 'true'
@@ -73,3 +74,4 @@ jobs:
             vehicle-knowledge.json
           retention-days: 14
           if-no-files-found: warn
+

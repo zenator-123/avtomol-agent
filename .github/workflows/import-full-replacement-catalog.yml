@@ -16,8 +16,6 @@ on:
         required: true
         default: "25"
         type: string
-  schedule:
-    - cron: "7 * * * *"
 
 permissions:
   contents: read
@@ -38,8 +36,8 @@ jobs:
       FULL_REPLACEMENT_MANIFEST_PATH: data/full-replacement-catalog-2026-07-28.enc.json
       FULL_REPLACEMENT_REPORT_PATH: full-replacement-catalog-import-report.json
       FULL_REPLACEMENT_GENERATION: "2026-07-28"
-      FULL_REPLACEMENT_MODE: ${{ github.event_name == 'schedule' && 'apply' || inputs.mode }}
-      FULL_REPLACEMENT_LIMIT: ${{ github.event_name == 'schedule' && '50' || inputs.batch_limit }}
+      FULL_REPLACEMENT_MODE: ${{ inputs.mode }}
+      FULL_REPLACEMENT_LIMIT: ${{ inputs.batch_limit }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,3 +56,4 @@ jobs:
           path: full-replacement-catalog-import-report.json
           if-no-files-found: warn
           retention-days: 30
+
