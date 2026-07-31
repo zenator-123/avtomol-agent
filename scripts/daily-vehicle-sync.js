@@ -8,7 +8,9 @@ const MIN_INVENTORY = Number(process.env.MIN_INVENTORY_COUNT || 10);
 const REQUIRED_AUTO1_CATALOG_SIZE = Number(process.env.AUTO1_REQUIRED_CATALOG_SIZE || 25000);
 const ALLOW_DELETIONS = String(process.env.ALLOW_DELETIONS || 'false').toLowerCase() === 'true';
 const ALLOW_ADDITIONS = String(process.env.ALLOW_ADDITIONS || 'false').toLowerCase() === 'true';
+const ALLOW_UPDATES = String(process.env.ALLOW_UPDATES || 'false').toLowerCase() === 'true';
 const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
+const FACEBOOK_PHOTOS_PER_POST = Math.max(1, Math.min(10, Number(process.env.FACEBOOK_PHOTOS_PER_POST || 10)));
 const REPORT_PATH = process.env.VEHICLE_SYNC_REPORT_PATH || 'daily-vehicle-sync-report.json';
 const KNOWLEDGE_PATH = process.env.VEHICLE_KNOWLEDGE_PATH || 'vehicle-knowledge.json';
 
@@ -24,13 +26,26 @@ function normalizeVehicle(raw) {
   const availability = String(pick(raw, ['availability', 'status']) || 'available').toLowerCase();
   const sold = raw?.sold === true || ['sold', 'unavailable', 'deleted', 'removed'].includes(availability);
   const images = pick(raw, ['images', 'imageUrls', 'image_urls']) || [];
+  const purchaseType = String(pick(raw, ['purchaseType', 'purchase_type', 'channel', 'salesChannel']) || '').toLowerCase();
+  const directPurchase = raw?.directPurchase === true || /instant|direct|fixed|незабавна|директна|фиксирана/.test(purchaseType);
+  const isUnroadworthy = raw?.isUnroadworthy === true || raw?.unroadworthy === true;
+  const retailState = String(pick(raw, ['retailState', 'retail_state', 'readiness', 'condition']) || '').toLowerCase();
+  const retailReady = raw?.retailReady === true || /retail[\s_-]*ready|готов.*продажба.*дребно/.test(retailState);
+  const normalizedImages = (Array.isArray(images) ? images : String(images).split(','))
+    .map((image) => typeof image === 'string' ? image : image?.url || image?.src || image?.originalSource)
+    .map(String)
+    .map((value) => value.trim())
+    .filter((value, index, values) => /^https:\/\//i.test(value) && values.indexOf(value) === index);
   return {
     incomingNumber,
-    available: !sold,
+    available: !sold && directPurchase && !isUnroadworthy && retailReady,
+    directPurchase,
+    isUnroadworthy,
+    retailReady,
     title: String(pick(raw, ['title', 'name']) || '').trim(),
     descriptionHtml: String(pick(raw, ['descriptionHtml', 'description_html', 'description']) || '').trim(),
     price: Number(pick(raw, ['price', 'priceValue', 'price_value']) || 0),
-    images: (Array.isArray(images) ? images : String(images).split(',')).map(String).map((x) => x.trim()).filter((x) => /^https:\/\//i.test(x)),
+    images: normalizedImages,
     brand: String(pick(raw, ['brand', 'make']) || '').trim(),
     model: String(pick(raw, ['model']) || '').trim(),
     year: String(pick(raw, ['year', 'makeYear', 'auto_make_year']) || '').trim(),
@@ -222,12 +237,32 @@ async function facebookRequest(path, options = {}) {
 }
 
 function facebookMessage(vehicle) {
+  const DAMAGE_TRANSLATIONS_BG = [
+    [/\bNon professional repaint\b/gi, 'Непрофесионално пребоядисване'],
+    [/\bRepaint\b/gi, 'Пребоядисване'],
+    [/\bUpholstery scratch\b/gi, 'Драскотина по тапицерията'],
+    [/\bUpholstery worn\b/gi, 'Износена тапицерия'],
+    [/\bAttachments scratch\b/gi, 'Драскотина по детайл'],
+    [/\bMovable body stone chip\b/gi, 'Удар от камъче по подвижен детайл'],
+    [/\bMovable body scratch\b/gi, 'Драскотина по подвижен детайл'],
+    [/\bCar wrapping\b/gi, 'Поставено автомобилно фолио'],
+    [/\bPaint not damaged\b/gi, 'Без увреждане на боята'],
+    [/\bPaint damaged\b/gi, 'С увреждане на боята'],
+    [/\bDeep to primer\b/gi, 'Дълбоко до грунда'],
+    [/\bIn drivers eyeline\b/gi, 'В зрителното поле на водача'],
+    [/\bFaded\b/gi, 'Избледняване'],
+    [/\bFracture\b/gi, 'Счупване'],
+  ];
+  let description = String(vehicle.descriptionHtml || '').replace(/<[^>]+>/g, ' ');
+  for (const [pattern, replacement] of DAMAGE_TRANSLATIONS_BG) description = description.replace(pattern, replacement);
+  description = description.replace(/\s+/g, ' ').trim().slice(0, 4500);
   return [
     `ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}`,
     vehicle.title,
     `КРАЙНА ЦЕНА: ${vehicle.price.toFixed(2)} EUR`,
     vehicle.year && `Година: ${vehicle.year}`,
     vehicle.mileage && `Пробег: ${vehicle.mileage} км`,
+    description,
     'Доставката до България е включена в цената.',
     'При поръчка се издава проформа фактура. След плащането автомобилът се доставя в указания срок.',
     'Телефон: 0876 778 357',
@@ -236,11 +271,39 @@ function facebookMessage(vehicle) {
 
 async function publishFacebookPost(vehicle, productHandle) {
   if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return '';
-  if (DRY_RUN) return `dry-run:${vehicle.incomingNumber}`;
-  const message = facebookMessage(vehicle);
-  const body = new URLSearchParams({ message, link: `https://avtomol.com/products/${productHandle}` });
-  const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/feed`, { method: 'POST', body });
-  return result.id;
+  const pageId = env('FACEBOOK_PAGE_ID');
+  const imageChunks = [];
+  for (let index = 0; index < vehicle.images.length; index += FACEBOOK_PHOTOS_PER_POST) {
+    imageChunks.push(vehicle.images.slice(index, index + FACEBOOK_PHOTOS_PER_POST));
+  }
+  if (!imageChunks.length) throw new Error(`${vehicle.incomingNumber} has no valid Facebook images.`);
+  if (DRY_RUN) return imageChunks.map((_, index) => `dry-run:${vehicle.incomingNumber}:${index + 1}`).join(',');
+  const postIds = [];
+  for (let chunkIndex = 0; chunkIndex < imageChunks.length; chunkIndex += 1) {
+    const photoIds = [];
+    for (const url of imageChunks[chunkIndex]) {
+      const photo = await facebookRequest(`${pageId}/photos`, {
+        method: 'POST',
+        body: new URLSearchParams({ url, published: 'false' }),
+      });
+      if (!photo?.id) throw new Error(`Facebook did not return a photo id for ${vehicle.incomingNumber}.`);
+      photoIds.push(photo.id);
+    }
+    const firstImage = chunkIndex * FACEBOOK_PHOTOS_PER_POST + 1;
+    const lastImage = firstImage + imageChunks[chunkIndex].length - 1;
+    const body = new URLSearchParams({
+      message: [
+        facebookMessage(vehicle),
+        `📷 СНИМКИ: ${chunkIndex + 1}/${imageChunks.length} (${firstImage}–${lastImage} от ${vehicle.images.length})`,
+        `https://avtomol.com/products/${productHandle}`,
+      ].join('\n'),
+    });
+    photoIds.forEach((id, index) => body.set(`attached_media[${index}]`, JSON.stringify({ media_fbid: id })));
+    const result = await facebookRequest(`${pageId}/feed`, { method: 'POST', body });
+    if (!result?.id) throw new Error(`Facebook did not return a gallery post id for ${vehicle.incomingNumber}.`);
+    postIds.push(result.id);
+  }
+  return postIds.join(',');
 }
 
 async function listFacebookPostsByIncomingNumber() {
@@ -257,7 +320,9 @@ async function listFacebookPostsByIncomingNumber() {
 async function updateFacebookPost(postId, vehicle) {
   if (!postId || !process.env.FACEBOOK_PAGE_ACCESS_TOKEN) return false;
   if (DRY_RUN) return true;
-  await facebookRequest(postId, { method: 'POST', body: new URLSearchParams({ message: facebookMessage(vehicle) }) });
+  for (const id of String(postId).split(',').map((value) => value.trim()).filter(Boolean)) {
+    await facebookRequest(id, { method: 'POST', body: new URLSearchParams({ message: facebookMessage(vehicle) }) });
+  }
   return true;
 }
 
@@ -271,7 +336,9 @@ async function saveFacebookPostId(productId, postId) {
 
 async function deleteFacebookPost(postId) {
   if (!postId || !process.env.FACEBOOK_PAGE_ACCESS_TOKEN || DRY_RUN) return;
-  await facebookRequest(postId, { method: 'DELETE' });
+  for (const id of String(postId).split(',').map((value) => value.trim()).filter(Boolean)) {
+    await facebookRequest(id, { method: 'DELETE' });
+  }
 }
 
 async function facebookOrFallback(label, operation, fallback, failures) {
@@ -317,13 +384,17 @@ async function main() {
   } else if (sold.length) {
     console.log(`SKIP ${sold.length} deletions because ALLOW_DELETIONS is false`);
   }
-  for (const vehicle of updates) {
-    const product = existing.get(vehicle.incomingNumber);
-    const priceChanged = await updateShopifyProductPrice(product, vehicle);
-    const postId = product.facebookPostId || facebookPosts.get(vehicle.incomingNumber) || '';
-    const facebookChanged = await facebookOrFallback(`update ${vehicle.incomingNumber}`, () => updateFacebookPost(postId, vehicle), false, report.facebookFailures);
-    if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
-    console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
+  if (ALLOW_UPDATES) {
+    for (const vehicle of updates) {
+      const product = existing.get(vehicle.incomingNumber);
+      const priceChanged = await updateShopifyProductPrice(product, vehicle);
+      const postId = product.facebookPostId || facebookPosts.get(vehicle.incomingNumber) || '';
+      const facebookChanged = await facebookOrFallback(`update ${vehicle.incomingNumber}`, () => updateFacebookPost(postId, vehicle), false, report.facebookFailures);
+      if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
+      console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
+    }
+  } else if (updates.length) {
+    console.log(`SKIP ${updates.length} updates because ALLOW_UPDATES is false`);
   }
   if (ALLOW_ADDITIONS) {
     for (const vehicle of additions) {
@@ -353,3 +424,4 @@ if (require.main === module) main().catch(async (error) => {
   process.exitCode = 1;
 });
 module.exports = { normalizeVehicle, vehicleDescription, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
+
