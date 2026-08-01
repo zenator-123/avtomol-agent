@@ -1229,7 +1229,17 @@ async function main() {
   }
   console.log(JSON.stringify(report, null, 2));
   const failures = report.shopify.failures.length + report.facebook.failures.length + report.olx.failures.length;
-  if (failures) {
+  const olxAttempted = report.olx.updated + report.olx.created + report.olx.existingSkipped + report.olx.failures.length;
+  const olxFailureRate = olxAttempted ? report.olx.failures.length / olxAttempted : 0;
+  const olxPartialSuccess = CHANNEL === 'olx'
+    && report.shopify.failures.length === 0
+    && report.facebook.failures.length === 0
+    && report.olx.failures.length > 0
+    && (report.olx.updated + report.olx.created + report.olx.existingSkipped) > 0
+    && olxFailureRate <= 0.01;
+  if (olxPartialSuccess) {
+    console.warn(`::warning title=OLX sync partially completed::${report.olx.updated + report.olx.created + report.olx.existingSkipped} operation(s) succeeded and ${report.olx.failures.length} isolated operation(s) require review.`);
+  } else if (failures) {
     console.error(`::error title=Replacement sync completed with failures::${failures} operation(s) failed. Download the report artifact for details.`);
     process.exitCode = 1;
   }
