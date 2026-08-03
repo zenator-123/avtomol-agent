@@ -166,7 +166,7 @@ function baseReport(manifest) {
     },
     olx: {
       advertsRead: 0, inactiveMatched: 0, deactivated: 0, deleted: 0,
-      replacementsMatched: 0, created: 0, updated: 0, existingSkipped: 0,
+      replacementsMatched: 0, created: 0, updated: 0, publiclyVerified: 0, existingSkipped: 0,
       skippedUnresolved: 0, deferred: 0, limited: 0,
       tokenRefreshed: false,
       unresolvedAttributes: [], deferredItems: [], failures: [], results: [],
@@ -1085,6 +1085,26 @@ async function updateOlxVehicle(advert, payload) {
   });
 }
 
+async function ensureOlxAdvertIsPublic(advertId) {
+  if (MODE !== 'apply') return { status: 'dry-run', publiclyVerified: false };
+  let advert = await readOlxAdvert(advertId);
+  if (advert.status === 'active') return { status: advert.status, publiclyVerified: true };
+  await olxRequest(`adverts/${advertId}/commands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: 'activate' }),
+  });
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    advert = await readOlxAdvert(advertId);
+    if (advert.status === 'active') return { status: advert.status, publiclyVerified: true };
+    if (!['new', 'unconfirmed'].includes(advert.status)) {
+      throw new Error(`OLX advert ${advertId} was updated but activation stopped with status ${advert.status}.`);
+    }
+  }
+  throw new Error(`OLX advert ${advertId} was updated but was not publicly active after 60 seconds.`);
+}
+
 async function synchronizeOlx(manifest, report) {
   const adverts = await listOlxAdverts();
   report.olx.tokenRefreshed = olxTokenRefreshed;
@@ -1170,8 +1190,10 @@ async function synchronizeOlx(manifest, report) {
         if (OLX_UPDATE_EXISTING) {
           const full = await readOlxAdvert(existing.id);
           await updateOlxVehicle(full, payload);
+          const verification = await ensureOlxAdvertIsPublic(existing.id);
           report.olx.updated += 1;
-          report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'update-replacement' });
+          if (verification.publiclyVerified) report.olx.publiclyVerified += 1;
+          report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, previousStatus: existing.status, status: verification.status, publiclyVerified: verification.publiclyVerified, action: 'update-replacement' });
         } else {
           report.olx.existingSkipped += 1;
           report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'retain-existing' });

@@ -8,7 +8,7 @@ on:
       update_existing:
         description: "Update OLX adverts that already match a stock number"
         required: true
-        default: false
+        default: true
         type: boolean
 
 permissions:
