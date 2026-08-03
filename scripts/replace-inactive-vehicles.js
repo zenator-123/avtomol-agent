@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
+const { isAvailableFeedVehicle } = require('../lib/olx-replacement-matcher');
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const FACEBOOK_API_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v25.0';
@@ -9,7 +10,7 @@ const OFFSET = Math.max(0, Number(process.env.REPLACEMENT_OFFSET || 0));
 const LIMIT = Math.max(0, Number(process.env.REPLACEMENT_LIMIT || 0));
 const LOCAL_VALIDATE_ONLY = String(process.env.REPLACEMENT_LOCAL_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const ALLOW_OLX_REFRESH = String(process.env.OLX_ALLOW_REFRESH || 'false').toLowerCase() === 'true';
-const OLX_UPDATE_EXISTING = String(process.env.OLX_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
+const OLX_UPDATE_EXISTING = String(process.env.OLX_UPDATE_EXISTING || 'false').toLowerCase() === 'true';
 const FACEBOOK_CREATE_LIMIT = Math.max(0, Number(process.env.FACEBOOK_CREATE_LIMIT || 0));
 const FACEBOOK_UPDATE_EXISTING = String(process.env.FACEBOOK_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
@@ -1063,7 +1064,25 @@ function olxPayload(vehicle, template, definitions) {
     courier: false,
     auto_extend_enabled: true,
   };
+  assertPublicOlxPayload(payload, vehicle);
   return { payload, unresolved: resolved.unresolved };
+}
+
+function assertPublicOlxPayload(payload, vehicle) {
+  const publicText = `${payload.title || ''}\n${payload.description || ''}`;
+  const forbidden = [
+    /AUTO1/i, /VAT\s*deductible/i, /възстановяемо\s+ДДС/i,
+    /нетна\s+цена/i, /покупна\s+цена/i, /размер\s+на\s+ДДС/i,
+    /себестойност/i, /очаквана\s+печалба/i, /service\s*fee/i,
+  ];
+  const match = forbidden.find((pattern) => pattern.test(publicText));
+  if (match) throw new Error(`Blocked internal data in public OLX payload: ${match}`);
+  if (!Array.isArray(payload.images) || payload.images.length < 5) {
+    throw new Error(`Blocked OLX payload for ${vehicle.stock}: fewer than 5 verified images.`);
+  }
+  if (!Number.isFinite(payload.price?.value) || payload.price.value <= 0) {
+    throw new Error(`Blocked OLX payload for ${vehicle.stock}: missing public sale price.`);
+  }
 }
 
 async function createOlxVehicle(payload) {
@@ -1085,24 +1104,25 @@ async function updateOlxVehicle(advert, payload) {
   });
 }
 
-async function ensureOlxAdvertIsPublic(advertId) {
+async function retainOlxForVerifiedReplacement(advert) {
+  return { deactivated: false, deleted: false, retainedForReplacement: true,
+    status: clean(advert.status).toLowerCase() };
+}
+
+async function ensureOlxAdvertIsPublic(advertId, expectedVehicle) {
   if (MODE !== 'apply') return { status: 'dry-run', publiclyVerified: false };
-  let advert = await readOlxAdvert(advertId);
-  if (advert.status === 'active') return { status: advert.status, publiclyVerified: true };
-  await olxRequest(`adverts/${advertId}/commands`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ command: 'activate' }),
-  });
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    advert = await readOlxAdvert(advertId);
-    if (advert.status === 'active') return { status: advert.status, publiclyVerified: true };
-    if (!['new', 'unconfirmed'].includes(advert.status)) {
-      throw new Error(`OLX advert ${advertId} was updated but activation stopped with status ${advert.status}.`);
-    }
+  const advert = await readOlxAdvert(advertId);
+  if (advert.status !== 'active') throw new Error(`OLX advert ${advertId} is not active; activation is forbidden.`);
+  const publicUrl = advert.url || advert.external_url || advert?.links?.public;
+  if (!publicUrl) throw new Error(`OLX advert ${advertId} has no public URL for verification.`);
+  const response = await fetch(publicUrl, { redirect: 'follow' });
+  if (!response.ok) throw new Error(`Public OLX verification failed for ${advertId}: HTTP ${response.status}.`);
+  const html = normalized(await response.text());
+  const expected = [expectedVehicle.brand, expectedVehicle.model, expectedVehicle.stock].filter(Boolean);
+  if (!expected.slice(0, 2).every((part) => html.includes(normalized(part)))) {
+    throw new Error(`Public OLX advert ${advertId} does not confirm the replacement vehicle.`);
   }
-  throw new Error(`OLX advert ${advertId} was updated but was not publicly active after 60 seconds.`);
+  return { status: advert.status, publiclyVerified: true, publicUrl };
 }
 
 async function synchronizeOlx(manifest, report) {
@@ -1121,13 +1141,13 @@ async function synchronizeOlx(manifest, report) {
         report.olx.inactiveMatched += 1;
         try {
           const advert = await readOlxAdvert(id);
-          const result = await deactivateAndDeleteOlx(advert);
+          const result = await retainOlxForVerifiedReplacement(advert);
           if (result.deactivated) report.olx.deactivated += 1;
           if (result.deleted) report.olx.deleted += 1;
           report.olx.results.push({
             stock: inactive.stock,
             advertId: id,
-            action: result.alreadyInactive ? 'inactive-already-nonactive' : 'remove-inactive',
+            action: 'retain-existing-for-verified-replacement',
           });
         } catch (error) {
           report.olx.failures.push({ stock: inactive.stock, advertId: id, action: 'remove-inactive', error: error.message });
@@ -1169,9 +1189,33 @@ async function synchronizeOlx(manifest, report) {
     ...manifest.vehicles,
     ...(LIMIT === 0 ? (manifest.olxFallbackVehicles || []) : []),
   ];
+  const allowedTargets = new Map();
+  for (const inactive of manifest.inactiveVehicles || []) {
+    for (const id of inactive.olxAdvertIds || []) allowedTargets.set(Number(id), inactive.stock);
+  }
   for (const [index, vehicle] of olxVehicles.entries()) {
-    const existing = advertByExternal.get(vehicle.handle.toLowerCase());
+    const targetAdvertId = Number(vehicle.targetOlxAdvertId || vehicle.olxAdvertId || 0);
+    const oldStock = clean(vehicle.replacesStock || vehicle.oldStock || allowedTargets.get(targetAdvertId));
+    const existing = targetAdvertId && oldStock && allowedTargets.get(targetAdvertId) === oldStock
+      ? advertById.get(targetAdvertId) : null;
     try {
+      if (!existing) {
+        report.olx.skippedUnresolved += 1;
+        report.olx.results.push({ oldStock, advertId: targetAdvertId || null, newStock: vehicle.stock,
+          action: 'review-no-exact-old-stock-advert-link' });
+        continue;
+      }
+      if (clean(existing.status).toLowerCase() !== 'active') {
+        report.olx.skippedUnresolved += 1;
+        report.olx.results.push({ oldStock, advertId: existing.id, newStock: vehicle.stock,
+          action: 'review-target-advert-not-active' });
+        continue;
+      }
+      if (!isAvailableFeedVehicle(vehicle)) {
+        report.olx.skippedUnresolved += 1;
+        report.olx.results.push({ stock: vehicle.stock, action: 'review-availability-unconfirmed' });
+        continue;
+      }
       const { template, definitions } = await categoryConfigFor(vehicle);
       const { payload, unresolved } = olxPayload(vehicle, template, definitions);
       if (unresolved.length) {
@@ -1190,20 +1234,21 @@ async function synchronizeOlx(manifest, report) {
         if (OLX_UPDATE_EXISTING) {
           const full = await readOlxAdvert(existing.id);
           await updateOlxVehicle(full, payload);
-          const verification = await ensureOlxAdvertIsPublic(existing.id);
+          const verification = await ensureOlxAdvertIsPublic(existing.id, vehicle);
           report.olx.updated += 1;
           if (verification.publiclyVerified) report.olx.publiclyVerified += 1;
-          report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, previousStatus: existing.status, status: verification.status, publiclyVerified: verification.publiclyVerified, action: 'update-replacement' });
+          report.olx.results.push({ oldStock, advertId: existing.id, newStock: vehicle.stock,
+            previousStatus: existing.status, status: verification.status, publiclyVerified: verification.publiclyVerified,
+            publicUrl: verification.publicUrl, action: 'update-same-advert-verified' });
         } else {
           report.olx.existingSkipped += 1;
           report.olx.results.push({ stock: vehicle.stock, advertId: existing.id, status: existing.status, action: 'retain-existing' });
         }
       } else {
-        const result = await createOlxVehicle(payload);
-        const advert = result?.data || result;
-        report.olx.created += 1;
-        if (advert?.status === 'limited') report.olx.limited += 1;
-        report.olx.results.push({ stock: vehicle.stock, advertId: advert?.id, status: advert?.status, action: 'create-replacement' });
+        // New adverts are forbidden in this workflow. A sold position must be
+        // replaced by updating that same advert id after reliable matching.
+        report.olx.skippedUnresolved += 1;
+        report.olx.results.push({ stock: vehicle.stock, action: 'review-no-existing-advert-position' });
       }
     } catch (error) {
       const deferredCreate = !existing

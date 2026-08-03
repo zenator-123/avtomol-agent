@@ -301,9 +301,7 @@ async function syncOlx(plan, report) {
       const advert = await readOlxAdvert(row.olx_ad_id);
       const status = String(advert.status || '').toLowerCase();
       if (status === 'active') {
-        if (MODE === 'apply') await deleteOlxAdvert(row.olx_ad_id);
-        report.olx.removed += 1;
-        report.olx.results.push({ ...row, action: 'remove-inactive' });
+        report.olx.results.push({ ...row, action: 'retained-for-verified-replacement' });
       } else {
         report.olx.already_inactive += 1;
         report.olx.results.push({ ...row, action: 'already-inactive', status });
