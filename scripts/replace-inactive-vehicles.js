@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
-const { isAvailableFeedVehicle } = require('../lib/olx-replacement-matcher');
+const { isAvailableFeedVehicle, selectReplacement } = require('../lib/olx-replacement-matcher');
 
 const SHOPIFY_API_VERSION = process.env.SHOPIFY_API_VERSION || '2026-07';
 const FACEBOOK_API_VERSION = process.env.FACEBOOK_GRAPH_VERSION || 'v25.0';
@@ -11,6 +11,7 @@ const LIMIT = Math.max(0, Number(process.env.REPLACEMENT_LIMIT || 0));
 const LOCAL_VALIDATE_ONLY = String(process.env.REPLACEMENT_LOCAL_VALIDATE_ONLY || 'false').toLowerCase() === 'true';
 const ALLOW_OLX_REFRESH = String(process.env.OLX_ALLOW_REFRESH || 'false').toLowerCase() === 'true';
 const OLX_UPDATE_EXISTING = String(process.env.OLX_UPDATE_EXISTING || 'false').toLowerCase() === 'true';
+const OLX_APPLY_LIMIT = Math.max(0, Number(process.env.OLX_APPLY_LIMIT || 1));
 const FACEBOOK_CREATE_LIMIT = Math.max(0, Number(process.env.FACEBOOK_CREATE_LIMIT || 0));
 const FACEBOOK_UPDATE_EXISTING = String(process.env.FACEBOOK_UPDATE_EXISTING || 'true').toLowerCase() === 'true';
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
@@ -1185,14 +1186,52 @@ async function synchronizeOlx(manifest, report) {
     return categoryConfigCache.get(categoryId);
   }
 
-  const olxVehicles = [
-    ...manifest.vehicles,
-    ...(LIMIT === 0 ? (manifest.olxFallbackVehicles || []) : []),
-  ];
+  const candidateVehicles = [...manifest.vehicles, ...(manifest.olxFallbackVehicles || [])];
   const allowedTargets = new Map();
   for (const inactive of manifest.inactiveVehicles || []) {
     for (const id of inactive.olxAdvertIds || []) allowedTargets.set(Number(id), inactive.stock);
   }
+  const inactiveStocks = new Set((manifest.inactiveVehicles || []).map(item => clean(item.stock)));
+  const discoveredByStock = new Map();
+  for (const advert of adverts) {
+    if (clean(advert.status).toLowerCase() !== 'active') continue;
+    const stock = stockFrom(`${advert.external_id || ''} ${advert.title || ''} ${advert.url || ''}`);
+    if (!stock || !inactiveStocks.has(stock)) continue;
+    if (!discoveredByStock.has(stock)) discoveredByStock.set(stock, []);
+    discoveredByStock.get(stock).push(advert);
+  }
+  for (const [stock, matches] of discoveredByStock) {
+    if (matches.length === 1) allowedTargets.set(Number(matches[0].id), stock);
+  }
+  report.olx.discoveredExactLinks = [...discoveredByStock.values()].filter(matches => matches.length === 1).length;
+
+  const explicitVehicles = candidateVehicles.filter(vehicle => {
+    const id = Number(vehicle.targetOlxAdvertId || vehicle.olxAdvertId || 0);
+    const oldStock = clean(vehicle.replacesStock || vehicle.oldStock || allowedTargets.get(id));
+    return id && oldStock && allowedTargets.get(id) === oldStock;
+  });
+  const usedStocks = new Set(explicitVehicles.map(vehicle => clean(vehicle.stock)));
+  const targetedOldStocks = new Set(explicitVehicles.map(vehicle => {
+    const id = Number(vehicle.targetOlxAdvertId || vehicle.olxAdvertId || 0);
+    return clean(vehicle.replacesStock || vehicle.oldStock || allowedTargets.get(id));
+  }));
+  const discoveredVehicles = [];
+  for (const [advertId, oldStock] of allowedTargets) {
+    if (targetedOldStocks.has(oldStock)) continue;
+    const advert = advertById.get(advertId);
+    if (!advert || clean(advert.status).toLowerCase() !== 'active') continue;
+    const titleYear = clean(advert.title).match(/\b(?:19|20)\d{2}\b/)?.[0] || '';
+    const advertForMatch = titleYear
+      ? { ...advert, attributes: [...(advert.attributes || []), { code: 'year', value: titleYear }] }
+      : advert;
+    const selection = selectReplacement(advertForMatch, candidateVehicles.filter(isAvailableFeedVehicle), usedStocks);
+    if (!selection.match) continue;
+    usedStocks.add(clean(selection.match.stock));
+    discoveredVehicles.push({ ...selection.match, replacesStock: oldStock, targetOlxAdvertId: advertId,
+      matchScore: selection.score, matchReasons: selection.reasons });
+  }
+  const olxVehicles = [...explicitVehicles, ...discoveredVehicles];
+  report.olx.reliableDynamicMatches = discoveredVehicles.length;
   for (const [index, vehicle] of olxVehicles.entries()) {
     const targetAdvertId = Number(vehicle.targetOlxAdvertId || vehicle.olxAdvertId || 0);
     const oldStock = clean(vehicle.replacesStock || vehicle.oldStock || allowedTargets.get(targetAdvertId));
@@ -1232,6 +1271,12 @@ async function synchronizeOlx(manifest, report) {
       if (existing) {
         report.olx.replacementsMatched += 1;
         if (OLX_UPDATE_EXISTING) {
+          if (OLX_APPLY_LIMIT > 0 && report.olx.updated >= OLX_APPLY_LIMIT) {
+            report.olx.skippedUnresolved += 1;
+            report.olx.results.push({ oldStock, advertId: existing.id, newStock: vehicle.stock,
+              action: 'review-apply-limit-reached' });
+            continue;
+          }
           const full = await readOlxAdvert(existing.id);
           await updateOlxVehicle(full, payload);
           const verification = await ensureOlxAdvertIsPublic(existing.id, vehicle);

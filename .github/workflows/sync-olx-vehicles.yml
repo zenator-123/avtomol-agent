@@ -10,6 +10,11 @@ on:
         required: true
         default: true
         type: boolean
+      apply_limit:
+        description: "Maximum same-advert replacements per run (1 until public verification)"
+        required: true
+        default: 1
+        type: number
 
 permissions:
   contents: read
@@ -38,6 +43,7 @@ jobs:
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       OLX_ALLOW_REFRESH: "false"
       OLX_UPDATE_EXISTING: ${{ github.event_name == 'schedule' && 'true' || inputs.update_existing }}
+      OLX_APPLY_LIMIT: ${{ inputs.apply_limit || '1' }}
 
     steps:
       - name: Check out repository
