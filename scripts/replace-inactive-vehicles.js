@@ -1310,6 +1310,15 @@ async function main() {
     console.error(`::error title=Replacement sync completed with failures::${failures} operation(s) failed. Download the report artifact for details.`);
     process.exitCode = 1;
   }
+  const olxNoRealChange = MODE === 'apply'
+    && (CHANNEL === 'olx' || CHANNEL === 'all')
+    && report.olx.updated === 0
+    && report.olx.publiclyVerified === 0
+    && report.olx.skippedUnresolved > 0;
+  if (olxNoRealChange) {
+    console.error(`::error title=OLX made no verified changes::${report.olx.skippedUnresolved} records need an exact oldStock -> advertId link; the run is not reported as successful.`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch(async (error) => {

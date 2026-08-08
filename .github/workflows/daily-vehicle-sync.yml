@@ -43,15 +43,18 @@ jobs:
       VEHICLE_SYNC_REPORT_PATH: daily-vehicle-sync-report.json
       VEHICLE_KNOWLEDGE_PATH: vehicle-knowledge.json
     steps:
-      - name: Check that it is 21:00 in Sofia
+      - name: Select the correct 21:00 Sofia schedule
         id: sofia_time
         shell: bash
         run: |
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "$(TZ=Europe/Sofia date +%H)" = "21" ]; then
+          OFFSET="$(TZ=Europe/Sofia date +%z)"
+          EXPECTED="0 19 * * *"
+          if [ "$OFFSET" = "+0300" ]; then EXPECTED="0 18 * * *"; fi
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ github.event.schedule }}" = "$EXPECTED" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping duplicate UTC schedule; it is not 21:00 in Sofia."
+            echo "Skipping only the duplicate UTC schedule; delayed 21:00 runs are no longer discarded."
           fi
       - uses: actions/checkout@v7
         if: steps.sofia_time.outputs.run == 'true'
