@@ -1200,6 +1200,31 @@ async function synchronizeOlx(manifest, report) {
     if (!discoveredByStock.has(stock)) discoveredByStock.set(stock, []);
     discoveredByStock.get(stock).push(advert);
   }
+  // OLX's list endpoint can omit external_id and the public URL even though the
+  // advert detail contains the exact stock. Read active adverts individually so
+  // the same advertId can be linked without guessing or creating a new slot.
+  report.olx.detailAdvertsChecked = 0;
+  report.olx.detailDiscoveryFailures = [];
+  for (const advert of adverts) {
+    if (clean(advert.status).toLowerCase() !== 'active') continue;
+    if (stockFrom(`${advert.external_id || ''} ${advert.title || ''} ${advert.url || ''}`)) continue;
+    try {
+      const detail = await readOlxAdvert(advert.id);
+      report.olx.detailAdvertsChecked += 1;
+      const stock = stockFrom([
+        detail.external_id,
+        detail.title,
+        detail.url,
+        detail.external_url,
+        detail.description,
+      ].filter(Boolean).join(' '));
+      if (!stock || !inactiveStocks.has(stock)) continue;
+      if (!discoveredByStock.has(stock)) discoveredByStock.set(stock, []);
+      discoveredByStock.get(stock).push(detail);
+    } catch (error) {
+      report.olx.detailDiscoveryFailures.push({ advertId: advert.id, error: error.message });
+    }
+  }
   for (const [stock, matches] of discoveredByStock) {
     if (matches.length === 1) allowedTargets.set(Number(matches[0].id), stock);
   }
