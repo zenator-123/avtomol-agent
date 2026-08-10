@@ -37,9 +37,11 @@ jobs:
       MIN_INVENTORY_COUNT: '25000'
       AUTO1_REQUIRED_CATALOG_SIZE: '25000'
       ALLOW_DELETIONS: 'false'
-      ALLOW_ADDITIONS: 'false'
-      ALLOW_UPDATES: 'false'
-      FACEBOOK_STRICT: 'true'
+      # Real daily mode: keep existing URLs, update matching stock records and
+      # add newly eligible vehicles. Missing vehicles are never deleted here.
+      ALLOW_ADDITIONS: 'true'
+      ALLOW_UPDATES: 'true'
+      FACEBOOK_STRICT: 'false'
       VEHICLE_SYNC_REPORT_PATH: daily-vehicle-sync-report.json
       VEHICLE_KNOWLEDGE_PATH: vehicle-knowledge.json
     steps:
