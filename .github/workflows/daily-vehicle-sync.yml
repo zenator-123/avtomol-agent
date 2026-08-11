@@ -32,9 +32,11 @@ jobs:
       FACEBOOK_PAGE_ACCESS_TOKEN: ${{ secrets.META_SYSTEM_USER_ACCESS_TOKEN || secrets.FACEBOOK_PAGE_ACCESS_TOKEN }}
       INVENTORY_FEED_URL: ${{ secrets.INVENTORY_FEED_URL }}
       INVENTORY_FEED_TOKEN: ${{ secrets.INVENTORY_FEED_TOKEN }}
-      SYNC_DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event_name == 'workflow_dispatch' && inputs.apply_changes == true && 'false' || 'true' }}
+      # A schedule may apply changes only when the verified full AUTO1 feed is
+      # actually configured. Without it the run remains an honest audit.
+      SYNC_DRY_RUN: ${{ github.event_name == 'schedule' && secrets.INVENTORY_FEED_URL != '' && 'false' || github.event_name == 'workflow_dispatch' && inputs.apply_changes == true && 'false' || 'true' }}
       MAX_DELETIONS_PER_RUN: ${{ vars.MAX_DELETIONS_PER_RUN || '20' }}
-      MIN_INVENTORY_COUNT: '25000'
+      MIN_INVENTORY_COUNT: ${{ secrets.INVENTORY_FEED_URL != '' && '25000' || '1' }}
       AUTO1_REQUIRED_CATALOG_SIZE: '25000'
       ALLOW_DELETIONS: 'false'
       # Real daily mode: keep existing URLs, update matching stock records and

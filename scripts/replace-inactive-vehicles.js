@@ -85,12 +85,27 @@ function validateManifest(manifest) {
   }
   const newStocks = new Set();
   const oldStocks = new Set();
+  const maximumAvailabilityAgeMs = Math.max(
+    60 * 1000,
+    Number(process.env.AUTO1_AVAILABILITY_MAX_AGE_HOURS || 24) * 60 * 60 * 1000,
+  );
   for (const vehicle of manifest.vehicles) {
     if (!/^[A-Z]{2}\d{5}$/.test(vehicle.stock) || newStocks.has(vehicle.stock)) {
       throw new Error(`Invalid or duplicate replacement stock: ${vehicle.stock}`);
     }
     if (vehicle.directPurchase !== true || vehicle.isUnroadworthy !== false) {
       throw new Error(`Safety stop: ${vehicle.stock} is not a confirmed roadworthy direct purchase.`);
+    }
+    if (MODE === 'apply') {
+      const checkedAt = vehicle.availabilityCheckedAt
+        || vehicle.availability_checked_at
+        || vehicle.auto1AvailabilityCheckedAt
+        || vehicle.auto1_availability_checked_at;
+      const checkedTime = Date.parse(checkedAt || '');
+      if (!isAvailableFeedVehicle(vehicle) || !Number.isFinite(checkedTime)
+        || Date.now() - checkedTime > maximumAvailabilityAgeMs || checkedTime > Date.now() + 5 * 60 * 1000) {
+        throw new Error(`Safety stop: ${vehicle.stock} has no fresh confirmed AUTO1 availability check.`);
+      }
     }
     if (!(Number(vehicle.price) > Number(vehicle.landedCost)) || !(Number(vehicle.expectedGrossProfit) > 0)) {
       throw new Error(`Safety stop: ${vehicle.stock} has no positive protected margin.`);
@@ -112,6 +127,17 @@ function validateManifest(manifest) {
     }
     if (vehicle.directPurchase !== true || vehicle.isUnroadworthy !== false) {
       throw new Error(`Safety stop: OLX fallback ${vehicle.stock} is not a confirmed roadworthy direct purchase.`);
+    }
+    if (MODE === 'apply') {
+      const checkedAt = vehicle.availabilityCheckedAt
+        || vehicle.availability_checked_at
+        || vehicle.auto1AvailabilityCheckedAt
+        || vehicle.auto1_availability_checked_at;
+      const checkedTime = Date.parse(checkedAt || '');
+      if (!isAvailableFeedVehicle(vehicle) || !Number.isFinite(checkedTime)
+        || Date.now() - checkedTime > maximumAvailabilityAgeMs || checkedTime > Date.now() + 5 * 60 * 1000) {
+        throw new Error(`Safety stop: OLX fallback ${vehicle.stock} has no fresh confirmed AUTO1 availability check.`);
+      }
     }
     if (!(Number(vehicle.price) > Number(vehicle.landedCost)) || !(Number(vehicle.expectedGrossProfit) > 0)) {
       throw new Error(`Safety stop: OLX fallback ${vehicle.stock} has no positive protected margin.`);
