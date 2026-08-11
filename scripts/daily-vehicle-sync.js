@@ -333,7 +333,7 @@ async function listFacebookPostsByIncomingNumber() {
   const posts = new Map();
   if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return posts;
   await ensureFacebookPageIdentity();
-  const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/feed?fields=id,message&limit=100`);
+  const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/published_posts?fields=id,message&limit=100`);
   for (const post of result.data || []) {
     const stock = String(post.message || '').match(/ВХОДЯЩ НОМЕР:\s*([A-Z]{2}\d{5})/i)?.[1]?.toUpperCase();
     if (stock) posts.set(stock, post.id);
