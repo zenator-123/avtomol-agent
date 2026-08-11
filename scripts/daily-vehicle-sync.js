@@ -226,14 +226,36 @@ async function deleteShopifyProduct(product) {
   if (data.productDelete.userErrors.length) throw new Error(`Shopify delete rejected: ${JSON.stringify(data.productDelete.userErrors)}`);
 }
 
-async function facebookRequest(path, options = {}) {
-  const token = env('FACEBOOK_PAGE_ACCESS_TOKEN');
+let facebookPageToken = '';
+
+async function facebookRequest(path, options = {}, tokenOverride = '') {
+  const token = tokenOverride || facebookPageToken || env('FACEBOOK_PAGE_ACCESS_TOKEN');
   const url = new URL(`https://graph.facebook.com/${process.env.FACEBOOK_GRAPH_VERSION || 'v24.0'}/${path}`);
   url.searchParams.set('access_token', token);
   const response = await fetch(url, options);
   const json = await response.json();
   if (!response.ok || json.error) throw new Error(`Facebook request failed: ${json.error?.message || response.status}`);
   return json;
+}
+
+async function ensureFacebookPageIdentity() {
+  if (facebookPageToken) return;
+  const configuredPageId = env('FACEBOOK_PAGE_ID');
+  const sourceToken = env('FACEBOOK_PAGE_ACCESS_TOKEN');
+  const identity = await facebookRequest('me?fields=id,name', {}, sourceToken);
+  if (String(identity.id) === configuredPageId && /avtomol(?:\.com)?/i.test(String(identity.name || '').replace(/\s+/g, ''))) {
+    facebookPageToken = sourceToken;
+    return;
+  }
+  const accounts = await facebookRequest('me/accounts?fields=id,name,access_token&limit=100', {}, sourceToken);
+  const page = (accounts.data || []).find((item) => String(item.id) === configuredPageId
+    && /avtomol(?:\.com)?/i.test(String(item.name || '').replace(/\s+/g, ''))
+    && item.access_token);
+  if (!page) {
+    throw new Error(`Safety stop: Facebook token does not expose the configured Avtomol.com Page ${configuredPageId}.`);
+  }
+  facebookPageToken = String(page.access_token);
+  console.log(`::add-mask::${facebookPageToken}`);
 }
 
 function facebookMessage(vehicle) {
@@ -271,6 +293,7 @@ function facebookMessage(vehicle) {
 
 async function publishFacebookPost(vehicle, productHandle) {
   if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return '';
+  await ensureFacebookPageIdentity();
   const pageId = env('FACEBOOK_PAGE_ID');
   const imageChunks = [];
   for (let index = 0; index < vehicle.images.length; index += FACEBOOK_PHOTOS_PER_POST) {
@@ -309,6 +332,7 @@ async function publishFacebookPost(vehicle, productHandle) {
 async function listFacebookPostsByIncomingNumber() {
   const posts = new Map();
   if (!process.env.FACEBOOK_PAGE_ACCESS_TOKEN || !process.env.FACEBOOK_PAGE_ID) return posts;
+  await ensureFacebookPageIdentity();
   const result = await facebookRequest(`${env('FACEBOOK_PAGE_ID')}/feed?fields=id,message&limit=100`);
   for (const post of result.data || []) {
     const stock = String(post.message || '').match(/ВХОДЯЩ НОМЕР:\s*([A-Z]{2}\d{5})/i)?.[1]?.toUpperCase();
@@ -319,6 +343,7 @@ async function listFacebookPostsByIncomingNumber() {
 
 async function updateFacebookPost(postId, vehicle) {
   if (!postId || !process.env.FACEBOOK_PAGE_ACCESS_TOKEN) return false;
+  await ensureFacebookPageIdentity();
   if (DRY_RUN) return true;
   for (const id of String(postId).split(',').map((value) => value.trim()).filter(Boolean)) {
     await facebookRequest(id, { method: 'POST', body: new URLSearchParams({ message: facebookMessage(vehicle) }) });
@@ -336,6 +361,7 @@ async function saveFacebookPostId(productId, postId) {
 
 async function deleteFacebookPost(postId) {
   if (!postId || !process.env.FACEBOOK_PAGE_ACCESS_TOKEN || DRY_RUN) return;
+  await ensureFacebookPageIdentity();
   for (const id of String(postId).split(',').map((value) => value.trim()).filter(Boolean)) {
     await facebookRequest(id, { method: 'DELETE' });
   }
