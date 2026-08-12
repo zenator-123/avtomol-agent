@@ -158,9 +158,11 @@ async function updateShopifyProduct(product, plan) {
   const variant = product.variants?.nodes?.[0];
   if (!variant?.id) throw new Error('No Shopify variant for ' + product.handle);
   const currentPrice = Number(variant.price || 0);
-  const newDescription = replaceEurPrice(product.descriptionHtml, plan.newPrice);
-  const priceChanged = Math.abs(currentPrice - plan.newPrice) > 0.009;
-  const descriptionChanged = Boolean(product.descriptionHtml) && newDescription !== product.descriptionHtml;
+  // This workflow is strictly reduction-only. A stale plan must never raise a
+  // price that has already been lowered by another valid process.
+  const priceChanged = currentPrice - plan.newPrice > 0.009;
+  const newDescription = priceChanged ? replaceEurPrice(product.descriptionHtml, plan.newPrice) : product.descriptionHtml;
+  const descriptionChanged = priceChanged && Boolean(product.descriptionHtml) && newDescription !== product.descriptionHtml;
   if (APPLY && priceChanged) {
     const data = await shopifyGraphql(
       'mutation SetVehiclePrice($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $productId, variants: $variants) { userErrors { field message } } }',
