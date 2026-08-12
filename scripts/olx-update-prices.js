@@ -74,7 +74,6 @@ async function main() {
   const planPath = path.join(process.cwd(), 'data', 'olx-price-updates-2026-07-17.json');
   const plan = JSON.parse(fs.readFileSync(planPath, 'utf8'));
   let updates = plan.updates;
-  if (scope === 'pilot') updates = updates.slice(0, 1);
   const requestedLimit = Number(process.env.BATCH_LIMIT || 0);
   if (requestedLimit > 0) updates = updates.slice(0, requestedLimit);
 
@@ -120,6 +119,7 @@ async function main() {
         report.updated++;
         report.results.push({ id: update.olx_ad_id, stock: update.stock_number, result: 'updated', old_price: currentPrice, new_price: next });
         await sleep(scope === 'pilot' ? 2500 : 350);
+        if (scope === 'pilot' && report.updated >= 1) break;
       }
       if ((index + 1) % 25 === 0 || index === updates.length - 1) {
         console.log(`Progress ${index + 1}/${updates.length}; updated=${report.updated}; validated=${report.dry_run}; failed=${report.failed}`);
