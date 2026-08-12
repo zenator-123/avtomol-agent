@@ -129,7 +129,7 @@ async function main() {
       report.results.push({ id: update.olx_ad_id, stock: update.stock_number, result: 'failed', error: error.message });
       console.error(`FAILED ${update.olx_ad_id} ${update.stock_number}: ${error.message}`);
       if (/doesn't belong to current partner/i.test(error.message)) {
-        report.terminal_error = 'OLX credential belongs to a different partner account; no further writes attempted.';
+        report.terminal_error = 'OLX lists the advert in this user account, but the advert belongs to a different partner/client application; no further writes attempted.';
         break;
       }
       // Preserve the failure report for diagnosis.
