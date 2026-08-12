@@ -35,6 +35,7 @@ jobs:
       OLX_CLIENT_SECRET: ${{ secrets.OLX_CLIENT_SECRET }}
       UPDATE_SCOPE: ${{ inputs.scope }}
       BATCH_LIMIT: ${{ inputs.batch_limit }}
+      MINIMUM_PROFIT_EUR: '350'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

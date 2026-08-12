@@ -67,6 +67,8 @@ function fullUpdatePayload(advert, update) {
 
 async function main() {
   const token = await getOlxAccessToken();
+  const minimumProfitEur = euro(Number(process.env.MINIMUM_PROFIT_EUR || 350));
+  if (!(minimumProfitEur >= 350)) throw new Error('MINIMUM_PROFIT_EUR cannot be below 350');
   const scope = process.env.UPDATE_SCOPE || 'dry-run';
   if (!['dry-run', 'pilot', 'batch'].includes(scope)) throw new Error(`Invalid UPDATE_SCOPE: ${scope}`);
   const planPath = path.join(process.cwd(), 'data', 'olx-price-updates-2026-07-17.json');
@@ -92,7 +94,9 @@ async function main() {
       const currentPrice = euro(current.price?.value);
       const expected = euro(update.expected_old_price_eur);
       const next = euro(update.new_price_eur);
-      const floor = euro(update.protected_minimum_eur);
+      const landedCost = euro(update.landed_cost_eur);
+      if (!(landedCost > 0)) throw new Error(`Missing or invalid landed cost: ${update.landed_cost_eur}`);
+      const floor = euro(Math.max(Number(update.protected_minimum_eur || 0), landedCost + minimumProfitEur));
       if (Math.abs(currentPrice - next) <= 0.01) {
         report.already_updated++;
         report.results.push({ id: update.olx_ad_id, stock: update.stock_number, result: 'already-updated', price: currentPrice });
@@ -101,7 +105,10 @@ async function main() {
       if (Math.abs(currentPrice - expected) > 0.02) throw new Error(`Current price ${currentPrice} differs from expected ${expected}`);
       if (!(next > 0 && next < currentPrice)) throw new Error(`Unsafe price direction: ${currentPrice} -> ${next}`);
       if (next + 0.01 < floor) throw new Error(`New price ${next} is below protected floor ${floor}`);
-      if (!(Number(update.profit_eur) > 0)) throw new Error(`Non-positive projected profit: ${update.profit_eur}`);
+      const projectedProfit = euro(next - landedCost);
+      if (projectedProfit + 0.01 < minimumProfitEur) {
+        throw new Error(`Projected profit ${projectedProfit} is below required ${minimumProfitEur}`);
+      }
       if (String(update.cost_status) === 'missing') throw new Error('Missing cost is not allowed');
 
       if (scope === 'dry-run') {
