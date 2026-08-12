@@ -7,6 +7,8 @@ const LIMIT = Math.max(0, Number(process.env.PRICE_SYNC_LIMIT || 0));
 const CHANNEL = String(process.env.PRICE_SYNC_CHANNEL || 'all').toLowerCase();
 const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCase() === 'true';
 const REPORT_PATH = process.env.PRICE_SYNC_REPORT_PATH || 'price-sync-report.json';
+const MINIMUM_PROFIT_EUR = Number(process.env.MINIMUM_PROFIT_EUR || 350);
+if (!(MINIMUM_PROFIT_EUR >= 350)) throw new Error('MINIMUM_PROFIT_EUR cannot be below 350');
 
 function required(name) {
   const value = process.env[name];
@@ -30,23 +32,28 @@ function buildVehiclePlans(doc) {
   }
   const advertIds = new Set();
   const byStock = new Map();
+  const rejected = [];
   for (const row of doc.updates) {
     const advertId = Number(row.olx_ad_id);
     const stock = String(row.stock_number || '').toUpperCase();
     const oldPrice = Number(row.expected_old_price_eur);
     const newPrice = Number(row.new_price_eur);
-    const floor = Number(row.protected_minimum_eur);
-    const profit = Number(row.profit_eur);
+    const landedCost = Number(row.landed_cost_eur);
+    const floor = Math.max(Number(row.protected_minimum_eur), landedCost + MINIMUM_PROFIT_EUR);
+    const profit = newPrice - landedCost;
     if (!advertId || advertIds.has(advertId)) throw new Error('Safety stop: duplicate or invalid advert id ' + advertId);
     if (!/^[A-Z]{2}\d{5}$/.test(stock)) throw new Error('Safety stop: invalid stock number ' + stock);
-    if (!(newPrice < oldPrice && newPrice >= floor && profit > 0)) throw new Error('Safety stop: unsafe price plan for ' + stock);
     advertIds.add(advertId);
+    if (!(landedCost > 0 && newPrice < oldPrice && newPrice >= floor && profit >= MINIMUM_PROFIT_EUR)) {
+      rejected.push({ advertId, stock, reason: 'Price is below the required 350 EUR profit', newPrice, landedCost, profit });
+      continue;
+    }
     const normalized = {
       stock,
       externalId: String(row.external_id || '').toLowerCase(),
       oldPrice,
       newPrice,
-      landedCost: Number(row.landed_cost_eur),
+      landedCost,
       protectedMinimum: floor,
       forecastProfit: profit,
       olxAdvertId: advertId,
@@ -58,7 +65,7 @@ function buildVehiclePlans(doc) {
     }
     if (!existing) byStock.set(stock, normalized);
   }
-  return { advertCount: advertIds.size, vehicles: [...byStock.values()] };
+  return { inputAdvertCount: advertIds.size, advertCount: advertIds.size - rejected.length, vehicles: [...byStock.values()], rejected };
 }
 
 let shopifyToken = '';
@@ -274,7 +281,9 @@ async function main() {
     startedAt: new Date().toISOString(),
     applyChanges: APPLY,
     channel: CHANNEL,
+    inputAdvertPlans: built.inputAdvertCount,
     advertPlans: built.advertCount,
+    rejectedPricePlans: built.rejected,
     uniqueVehiclePlans: built.vehicles.length,
     selectedVehiclePlans: vehicles.length,
     shopify: { enabled: CHANNEL === 'all' || CHANNEL === 'shopify', productsRead: 0, matchedProducts: 0, updatedPrices: 0, updatedDescriptions: 0, missingStocks: [], failures: [] },

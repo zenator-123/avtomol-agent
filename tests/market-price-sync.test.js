@@ -5,11 +5,14 @@ const { stockFromText, replaceEurPrice, buildVehiclePlans, matchPlanForProduct, 
 
 test('validates exactly 800 unique advert reductions', () => {
   const built = buildVehiclePlans(data);
-  assert.equal(built.advertCount, 800);
-  assert.equal(built.vehicles.length, 698);
+  assert.equal(built.inputAdvertCount, 800);
+  assert.equal(built.rejected.length, 18);
+  assert.equal(built.advertCount, 782);
+  assert.equal(built.vehicles.length, 683);
   assert.ok(built.vehicles.every((row) => row.newPrice < row.oldPrice));
   assert.ok(built.vehicles.every((row) => row.newPrice >= row.protectedMinimum));
-  assert.ok(built.vehicles.every((row) => row.forecastProfit > 0));
+  assert.ok(built.vehicles.every((row) => row.forecastProfit >= 350));
+  assert.ok(built.rejected.every((row) => row.profit < 350));
 });
 
 test('finds stock numbers and replaces EUR price', () => {

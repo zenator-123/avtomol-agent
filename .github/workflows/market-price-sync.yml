@@ -55,6 +55,7 @@ jobs:
       INPUT_CHANNEL: ${{ inputs.channel }}
       INPUT_LIMIT: ${{ inputs.limit }}
       MARKET_PRICE_PLAN_COUNT: '800'
+      MINIMUM_PROFIT_EUR: '350'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
