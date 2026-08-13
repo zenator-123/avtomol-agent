@@ -17,6 +17,8 @@ const FACEBOOK_UPDATE_EXISTING = String(process.env.FACEBOOK_UPDATE_EXISTING || 
 const MANIFEST_PATH = process.env.REPLACEMENT_MANIFEST_PATH || 'data/replacement-vehicles-2026-07-27.enc.json';
 const REPORT_PATH = process.env.REPLACEMENT_REPORT_PATH || 'replacement-vehicle-sync-report.json';
 const OLX_TOKEN_HANDOFF_PATH = process.env.OLX_TOKEN_HANDOFF_PATH || '';
+// FF94775 is owned stock. AUTO1 absence must never remove, draft or replace it.
+const PROTECTED_STOCKS = new Set(['FF94775']);
 
 if (!['dry-run', 'apply'].includes(MODE)) throw new Error(`Invalid REPLACEMENT_MODE: ${MODE}`);
 if (!['all', 'shopify', 'facebook', 'olx'].includes(CHANNEL)) throw new Error(`Invalid REPLACEMENT_CHANNEL: ${CHANNEL}`);
@@ -479,6 +481,7 @@ async function synchronizeShopify(manifest, report) {
 
   if (OFFSET === 0) {
     for (const inactive of manifest.inactiveVehicles) {
+      if (PROTECTED_STOCKS.has(clean(inactive.stock))) continue;
       const matches = byStock.get(inactive.stock) || [];
       report.shopify.inactiveMatched += matches.length;
       for (const product of matches) {
@@ -727,6 +730,7 @@ async function synchronizeFacebook(manifest, report) {
   }
   if (OFFSET === 0) {
     for (const inactive of manifest.inactiveVehicles) {
+      if (PROTECTED_STOCKS.has(clean(inactive.stock))) continue;
       const matches = postsByStock.get(inactive.stock) || [];
       report.facebook.inactiveMatched += matches.length;
       for (const post of matches) {
@@ -1161,6 +1165,7 @@ async function synchronizeOlx(manifest, report) {
 
   if (OFFSET === 0) {
     for (const inactive of manifest.inactiveVehicles) {
+      if (PROTECTED_STOCKS.has(clean(inactive.stock))) continue;
       const ids = inactive.olxAdvertIds || [];
       for (const id of ids) {
         const summary = advertById.get(Number(id));
@@ -1215,9 +1220,11 @@ async function synchronizeOlx(manifest, report) {
   const candidateVehicles = [...manifest.vehicles, ...(manifest.olxFallbackVehicles || [])];
   const allowedTargets = new Map();
   for (const inactive of manifest.inactiveVehicles || []) {
+    if (PROTECTED_STOCKS.has(clean(inactive.stock))) continue;
     for (const id of inactive.olxAdvertIds || []) allowedTargets.set(Number(id), inactive.stock);
   }
-  const inactiveStocks = new Set((manifest.inactiveVehicles || []).map(item => clean(item.stock)));
+  const inactiveStocks = new Set((manifest.inactiveVehicles || [])
+    .map(item => clean(item.stock)).filter(stock => !PROTECTED_STOCKS.has(stock)));
   const discoveredByStock = new Map();
   for (const advert of adverts) {
     if (clean(advert.status).toLowerCase() !== 'active') continue;

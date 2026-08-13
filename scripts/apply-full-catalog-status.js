@@ -12,6 +12,8 @@ const BATCH_LIMIT = Math.max(1, Number(process.env.FULL_CATALOG_STATUS_BATCH_LIM
 const REPORT_PATH = process.env.FULL_CATALOG_STATUS_REPORT_PATH
   || 'full-catalog-status-report.json';
 const CONCURRENCY = Math.max(1, Math.min(12, Number(process.env.FULL_CATALOG_STATUS_CONCURRENCY || 6)));
+// Owner inventory: never hide it merely because it is no longer offered by AUTO1.
+const PROTECTED_STOCKS = new Set(['FF94775']);
 
 if (!['dry-run', 'apply'].includes(MODE)) throw new Error(`Invalid mode: ${MODE}`);
 
@@ -72,7 +74,7 @@ async function main() {
       else activationQueue.push({ product, stock, targetStatus: 'ACTIVE', action: 'activate-replacement' });
       continue;
     }
-    if (sold.has(stock)) {
+    if (sold.has(stock) && !PROTECTED_STOCKS.has(stock)) {
       soldMatchedProducts += 1;
       if (product.status === 'ACTIVE') {
         draftQueue.push({ product, stock, targetStatus: 'DRAFT', action: 'draft-sold' });
