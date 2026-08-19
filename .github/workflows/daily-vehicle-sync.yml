@@ -51,14 +51,16 @@ jobs:
         id: sofia_time
         shell: bash
         run: |
-          OFFSET="$(TZ=Europe/Sofia date +%z)"
-          EXPECTED="0 19 * * *"
-          if [ "$OFFSET" = "+0300" ]; then EXPECTED="0 18 * * *"; fi
-          if [ "${{ github.event_name }}" != "schedule" ] || [ "${{ github.event.schedule }}" = "$EXPECTED" ]; then
+          # GitHub exposes the combined cron expression ("0 18,19 * * *")
+          # for both invocations, so comparing it to a single-hour expression
+          # always skipped the real 21:00 Sofia run while still reporting a
+          # green workflow. Select by the actual Sofia local hour instead.
+          SOFIA_HOUR="$(TZ=Europe/Sofia date +%H)"
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$SOFIA_HOUR" = "21" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping only the duplicate UTC schedule; delayed 21:00 runs are no longer discarded."
+            echo "Skipping duplicate UTC invocation; Sofia local hour is ${SOFIA_HOUR}."
           fi
       - uses: actions/checkout@v7
         if: steps.sofia_time.outputs.run == 'true'
