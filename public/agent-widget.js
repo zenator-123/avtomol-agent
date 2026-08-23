@@ -26,9 +26,9 @@
   function parsePrompts(value) {
     if (!value) {
       return [
+        "Имам нужда от пътна помощ",
         "Търся накладки за VW Golf 5 2006",
         "Зимни гуми 205/55R16",
-        "Масло за BMW 320d 2008",
         "Искам запитване по рама"
       ];
     }
@@ -51,7 +51,7 @@
     var greeting = hour >= 18 || hour < 6 ? "Добър вечер!" : "Добър ден!";
     return (
       greeting +
-      " С какво мога да помогна? Опишете марка, модел, година и частта, която търсите."
+      " С какво мога да помогна? За пътна помощ ще поискам локация, проблем и вид автомобил."
     );
   }
 
@@ -164,6 +164,19 @@
     );
   }
 
+  function buildContactActionsHtml(actions) {
+    if (!Array.isArray(actions) || !actions.length) {
+      return "";
+    }
+    return (
+      '<div class="avm-agent-contact-actions">' +
+      actions.map(function (action) {
+        return '<a class="avm-agent-contact-action" href="' + escapeHtml(action.url || "#") + '" data-copy="' + escapeHtml(action.copyText || "") + '">' + escapeHtml(action.label || "Изпрати") + '</a>';
+      }).join("") +
+      "</div>"
+    );
+  }
+
   function getScriptTag() {
     return (
       document.currentScript ||
@@ -187,7 +200,7 @@
         avatarUrl: dataset.avatarUrl || apiBase + "/operator-avatar.png?v=avtomol-3",
         greeting: dataset.greeting || timeGreeting(),
         primaryColor: dataset.primaryColor || "#c90018",
-        subtitle: dataset.subtitle || "Авточасти, гуми, масла и акумулатори",
+        subtitle: dataset.subtitle || "Авточасти и пътна помощ 24/7",
         title: dataset.title || "AvtoMol AI консултант",
         toggleLabel: dataset.toggleLabel || "Чат",
         quickPrompts: parsePrompts(dataset.quickPrompts)
@@ -232,6 +245,7 @@
         ".avm-agent-suggestions{display:grid;gap:8px;margin-top:10px}" +
         ".avm-agent-card{display:block;padding:11px 12px;border-radius:12px;text-decoration:none;color:inherit;background:#fffafa;border:1px solid rgba(15,23,42,.1)}" +
         ".avm-agent-card strong{display:block;margin-bottom:4px;font-size:14px}.avm-agent-card span{display:block;line-height:1.4}.avm-agent-card small{display:block;margin-top:5px;color:rgba(15,23,42,.68)}" +
+        ".avm-agent-contact-actions{display:grid;gap:8px;margin-top:12px}.avm-agent-contact-action{display:block;padding:10px 12px;border-radius:999px;background:var(--avm-primary);color:#fff!important;font-weight:900;text-align:center;text-decoration:none}" +
         ".avm-agent-quick{display:flex;flex-wrap:wrap;gap:8px;padding:0 16px 12px}" +
         ".avm-agent-chip{border:1px solid rgba(15,23,42,.12);border-radius:999px;background:rgba(255,255,255,.92);cursor:pointer;padding:8px 10px;font:inherit;font-size:12px;color:#14202b}" +
         ".avm-agent-form{display:flex;gap:10px;padding:12px 14px 14px;border-top:1px solid rgba(15,23,42,.1);background:rgba(255,255,255,.92)}" +
@@ -255,7 +269,7 @@
         escapeHtml(config.subtitle) +
         "</p></div></div></div>" +
         '<div class="avm-agent-body"><div class="avm-agent-messages"></div><div class="avm-agent-quick"></div>' +
-        '<form class="avm-agent-form"><input class="avm-agent-input" type="text" placeholder="Напиши кола, година и част..." /><button class="avm-agent-send" type="submit">Изпрати</button></form>' +
+        '<form class="avm-agent-form"><input class="avm-agent-input" type="text" placeholder="Опишете нужната помощ..." /><button class="avm-agent-send" type="submit">Изпрати</button></form>' +
         "</div></div>" +
         '<button class="avm-agent-toggle" type="button" aria-label="' +
         escapeHtml(config.toggleLabel) +
@@ -317,11 +331,19 @@
         messages.scrollTop = messages.scrollHeight;
       }
 
-      function appendMessage(role, body, suggestions) {
+      function appendMessage(role, body, suggestions, contactActions) {
         var bubble = document.createElement("div");
         bubble.className =
           "avm-agent-bubble " + (role === "user" ? "avm-agent-user" : "avm-agent-assistant");
-        bubble.innerHTML = renderMessageText(body) + buildSuggestionHtml(suggestions);
+        bubble.innerHTML = renderMessageText(body) + buildSuggestionHtml(suggestions) + buildContactActionsHtml(contactActions);
+        Array.prototype.forEach.call(bubble.querySelectorAll(".avm-agent-contact-action[data-copy]"), function (link) {
+          link.addEventListener("click", function () {
+            var copyText = link.getAttribute("data-copy");
+            if (copyText && navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(copyText).catch(function () {});
+            }
+          });
+        });
         messages.appendChild(bubble);
         scrollBottom();
         return bubble;
@@ -382,7 +404,7 @@
             return;
           }
 
-          appendMessage("assistant", payload.reply, payload.suggestions || []);
+          appendMessage("assistant", payload.reply, payload.suggestions || [], payload.contactActions || []);
         } catch (error) {
           loading.remove();
           appendMessage(

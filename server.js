@@ -6,7 +6,15 @@ const { URL } = require("node:url");
 const { ensureDir, loadEnvFile, readJson } = require("./lib/config");
 const { buildOutfitSuggestions, pickFocusSuggestion, searchProducts } = require("./lib/catalog");
 const { buildCatalogOptions, buildVehicleTree, searchCatalog } = require("./lib/catalog-api");
-const { callOpenAI, detectLanguage, extractLead, findFaqAnswer, generateFallbackReply } = require("./lib/assistant");
+const {
+  buildRoadsideRequestPrompt,
+  callOpenAI,
+  detectLanguage,
+  detectRoadsideIntent,
+  extractLead,
+  findFaqAnswer,
+  generateFallbackReply,
+} = require("./lib/assistant");
 
 const projectRoot = __dirname;
 loadEnvFile(path.join(projectRoot, ".env"));
@@ -154,6 +162,7 @@ function getSession(sessionId) {
   if (!sessions.has(sessionId)) {
     sessions.set(sessionId, {
       previousResponseId: null,
+      roadsideRequest: null,
       updatedAt: Date.now(),
     });
   }
@@ -259,6 +268,73 @@ async function handleChat(request, response, origin) {
   const focusSuggestion = outfitSuggestions.length > 1 ? null : pickFocusSuggestion(message, publicSuggestions);
   const session = getSession(sessionId);
   const capturedLead = extractLead(message);
+
+  if (detectRoadsideIntent(message) && !session.roadsideRequest?.awaitingDetails) {
+    session.roadsideRequest = {
+      awaitingDetails: true,
+      openedAt: new Date().toISOString(),
+      trigger: message,
+    };
+    sendJson(
+      response,
+      200,
+      {
+        leadCaptured: false,
+        focusAction: null,
+        mode: "roadside-intake",
+        reply: buildRoadsideRequestPrompt(),
+        sessionId,
+        suggestions: [],
+      },
+      origin
+    );
+    return;
+  }
+
+  if (session.roadsideRequest?.awaitingDetails) {
+    const summary = [
+      "ЗАЯВКА ЗА ПЪТНА ПОМОЩ 24/7 — AvtoMol.com",
+      `Данни от клиента: ${message}`,
+      `Страница: ${pageContext.currentUrl || "avtomol.com"}`,
+    ].join("\n");
+    const encodedSummary = encodeURIComponent(summary);
+    const viberUrl = "viber://chat?number=%2B359876778357";
+    const whatsappUrl = `https://wa.me/359876778357?text=${encodedSummary}`;
+    session.roadsideRequest = {
+      ...session.roadsideRequest,
+      awaitingDetails: false,
+      completedAt: new Date().toISOString(),
+      details: message,
+      summary,
+    };
+
+    await saveLead({
+      contact: { channel: "viber", phone: "0876 778 357", type: "roadside-assistance" },
+      message: summary,
+      pageContext,
+      sessionId,
+    });
+
+    sendJson(
+      response,
+      200,
+      {
+        contactActions: [
+          { copyText: summary, label: "Изпрати по Viber", url: viberUrl },
+          { label: "Изпрати по WhatsApp", url: whatsappUrl },
+          { label: "Обади се 0876 778 357", url: "tel:+359876778357" },
+        ],
+        leadCaptured: true,
+        focusAction: null,
+        mode: "roadside-ready",
+        reply: `Благодаря — заявката е подготвена. Натиснете „Изпрати по Viber“, за да отворите чата с 0876 778 357. Текстът на заявката ще бъде копиран и можете да го поставите и изпратите.`,
+        sessionId,
+        suggestions: [],
+      },
+      origin
+    );
+    return;
+  }
 
   let reply = "";
   let mode = "demo";

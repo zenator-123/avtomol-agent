@@ -1,6 +1,18 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { findFaqAnswer, generateFallbackReply } = require("../lib/assistant");
+const { detectRoadsideIntent, findFaqAnswer, generateFallbackReply } = require("../lib/assistant");
+
+test("detects a Bulgarian roadside assistance request", () => {
+  assert.equal(detectRoadsideIntent("Имам нужда от пътна помощ, колата не пали"), true);
+});
+
+test("asks for location, problem, and vehicle for roadside assistance", () => {
+  const reply = generateFallbackReply({ matches: [], message: "Трябва ми репатрак", profile: {} });
+  assert.match(reply, /GPS локация/);
+  assert.match(reply, /какъв е проблемът/);
+  assert.match(reply, /какъв е автомобилът/);
+  assert.match(reply, /0876 778 357/);
+});
 const profile = require("../data/store-profile.json");
 
 test("explains included vehicle delivery and pro forma payment", () => {
