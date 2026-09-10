@@ -3,7 +3,8 @@ name: Avtomol daily vehicle sync
 on:
   schedule:
     # Both UTC equivalents of 21:00 Europe/Sofia; the guard handles DST.
-    - cron: '0 18,19 * * *'
+    - cron: '0 18 * * *'
+    - cron: '0 19 * * *'
   workflow_dispatch:
     inputs:
       apply_changes:
