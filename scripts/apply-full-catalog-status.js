@@ -89,6 +89,8 @@ async function main() {
   const report = {
     generatedAt: new Date().toISOString(),
     mode: MODE,
+    writesBlocked: true,
+    writeBlockReason: 'Historical manifest is not current AUTO1 availability evidence. Preserve visible sold listings; use verified live checks for changes.',
     batchLimit: BATCH_LIMIT,
     concurrency: CONCURRENCY,
     productsRead: products.length,
@@ -133,7 +135,9 @@ async function main() {
   };
 
   await fs.writeFile(REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  if (MODE === 'dry-run') {
+  // Owner authorization 2026-09-21: do not hide sold vehicles or restore stale statuses.
+  // Keep this legacy manifest job report-only, including explicit apply invocations.
+  if (report.writesBlocked || MODE === 'dry-run') {
     console.log(JSON.stringify(report, null, 2));
     return;
   }
