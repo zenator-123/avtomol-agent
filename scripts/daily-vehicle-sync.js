@@ -167,14 +167,19 @@ function slug(value) {
 }
 
 function vehicleDescription(vehicle) {
-  if (vehicle.descriptionHtml) return vehicle.descriptionHtml;
+  const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Проверка на наличността във Viber</h3><p><strong>Изпратете във Viber на 0876 778 357 входящия номер на автомобила: ${vehicle.incomingNumber}.</strong></p><p>Ще потвърдим актуалната наличност, цената и следващите стъпки.</p><p><a href="/pages/zapitvane-za-avtomobil">Как да направя проверка</a></p></div>`;
+  if (vehicle.descriptionHtml) {
+    if (/Проверка на наличността във Viber|Изпратете във Viber на 0876 778 357/i.test(vehicle.descriptionHtml)) return vehicle.descriptionHtml;
+    return viberBox + vehicle.descriptionHtml;
+  }
   const facts = [
     ['Марка', vehicle.brand], ['Модел', vehicle.model], ['Година', vehicle.year],
     ['Пробег', vehicle.mileage], ['Гориво', vehicle.fuel], ['Скоростна кутия', vehicle.transmission],
   ].filter(([, value]) => value);
-  return `<div style="border:2px solid #d40000;padding:14px;color:#d40000;font-size:24px;font-weight:700">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
+  return viberBox
+    + `<div style="border:2px solid #d40000;padding:14px;color:#d40000;font-size:24px;font-weight:700">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
     + `<h2>${vehicle.title}</h2><ul>${facts.map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}</ul>`
-    + '<p>Предлагаме проверени автомобили от Европа и авточасти за всички видове автомобили. Телефон: 0876 778 357.</p>';
+    + '<p>Предлагаме проверени автомобили от Европа и авточасти за всички видове автомобили.</p>';
 }
 
 async function createShopifyProduct(vehicle) {
