@@ -386,13 +386,17 @@ async function facebookOrFallback(label, operation, fallback, failures) {
 async function main() {
   const report = { startedAt: new Date().toISOString(), dryRun: DRY_RUN, facebookDegraded: false, facebookFailures: [] };
   const inventory = await loadInventory();
-  const catalogSource = process.env.INVENTORY_FEED_URL ? 'AUTO1_FEED' : 'LOCAL_TEST_SAMPLE';
+  const catalogSource = process.env.INVENTORY_SOURCE || (process.env.INVENTORY_FEED_URL ? 'AUTO1_FEED' : 'LOCAL_TEST_SAMPLE');
   const knowledge = learnVehicles(inventory, new Date().toISOString(), { catalogSource, expectedCatalogSize: REQUIRED_AUTO1_CATALOG_SIZE });
   if (!knowledge.completeAuto1Catalog) {
     console.warn(`::warning::Vehicle learning is partial: ${inventory.length} of at least ${REQUIRED_AUTO1_CATALOG_SIZE} expected AUTO1 vehicles (${catalogSource}).`);
   }
-  if (!DRY_RUN && (catalogSource !== 'AUTO1_FEED' || !knowledge.completeAuto1Catalog)) {
-    throw new Error(`Safety stop: real synchronization requires a verified AUTO1 feed with at least ${REQUIRED_AUTO1_CATALOG_SIZE} unique vehicles; received ${inventory.length} from ${catalogSource}.`);
+  const liveAuto1Source = catalogSource === 'AUTO1_FEED' || catalogSource === 'AUTO1_BROWSER';
+  if (!DRY_RUN && !liveAuto1Source) {
+    throw new Error(`Safety stop: real synchronization requires a live AUTO1 source; received ${catalogSource}.`);
+  }
+  if (!DRY_RUN && ALLOW_DELETIONS && !knowledge.completeAuto1Catalog) {
+    throw new Error(`Safety stop: deletions require the verified full AUTO1 catalog with at least ${REQUIRED_AUTO1_CATALOG_SIZE} unique vehicles; received ${inventory.length}.`);
   }
   await fs.writeFile(KNOWLEDGE_PATH, JSON.stringify(knowledge, null, 2) + '\n', 'utf8');
   report.learning = knowledge.totals;
