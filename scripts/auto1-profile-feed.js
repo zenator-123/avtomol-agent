@@ -539,11 +539,11 @@ async function main() {
     timezoneId: 'Europe/Sofia'
   });
 
-  const page = context.pages()[0] || await context.newPage();
+  let page = context.pages()[0] || await context.newPage();
   const collected = new Map();
   let jsonResponses = 0;
 
-  page.on('response', async response => {
+  const attachResponseListener = (targetPage) => targetPage.on('response', async response => {
     try {
       const url = response.url();
       if (!/auto1\.(com|cloud)/i.test(url)) return;
@@ -561,6 +561,12 @@ async function main() {
     } catch {}
   });
 
+  attachResponseListener(page);
+  context.on('page', (newPage) => {
+    page = newPage;
+    attachResponseListener(newPage);
+  });
+
   await page.goto(inventoryUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(1800);
 
@@ -570,6 +576,13 @@ async function main() {
     console.log('2) Отвори страницата с автомобилите за НЕЗАБАВНА/ДИРЕКТНА ПОКУПКА.');
     console.log('3) Настрой филтрите, които искаш да се следят.');
     await ask('\nКогато страницата е готова, натисни ENTER тук...');
+    const livePages = context.pages().filter((candidate) => !candidate.isClosed());
+    if (livePages.length) page = livePages[livePages.length - 1];
+    if (!page || page.isClosed()) {
+      page = await context.newPage();
+      attachResponseListener(page);
+      await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    }
     const saved = {
       startUrl,
       inventoryUrl: page.url(),
