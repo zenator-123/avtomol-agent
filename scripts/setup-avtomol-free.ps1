@@ -78,6 +78,37 @@ Set-DotEnvValue "ALLOW_UPDATES" "true"
 Set-DotEnvValue "SYNC_DRY_RUN" "false"
 
 Write-Host ""
+Write-Host "Checking Node.js / npm..." -ForegroundColor Cyan
+
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+$npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+
+if (-not $nodeCmd -or -not $npmCmd) {
+  Write-Host "Node.js is not installed. Trying to install Node.js LTS with winget..." -ForegroundColor Yellow
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if (-not $winget) {
+    Write-Host "winget was not found. Install Node.js LTS from https://nodejs.org/en/download and run this setup again." -ForegroundColor Red
+    throw "Node.js/npm missing"
+  }
+
+  winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
+  if ($LASTEXITCODE -ne 0) { throw "Node.js installation failed" }
+
+  $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+  $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
+
+  if (-not $nodeCmd -or -not $npmCmd) {
+    Write-Host "Node.js was installed, but this window has not picked up the new PATH yet." -ForegroundColor Yellow
+    Write-Host "Close this window and run SETUP-AVTOMOL-FREE.cmd again." -ForegroundColor Yellow
+    exit 0
+  }
+}
+
+Write-Host ("Node: " + (& node --version)) -ForegroundColor Green
+Write-Host ("npm:  " + (& npm --version)) -ForegroundColor Green
+
+Write-Host ""
 Write-Host "Installing Node dependencies..." -ForegroundColor Cyan
 Push-Location $Repo
 try {
