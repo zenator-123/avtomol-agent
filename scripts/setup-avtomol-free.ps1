@@ -46,15 +46,28 @@ Write-Host "Не поставяй пароли или токени в ChatGPT. �
 Write-Host ""
 
 $shopDomain = Read-Required "Shopify *.myshopify.com домейн"
-$shopClientId = Read-Required "Shopify Custom App Client ID"
-$shopClientSecret = Read-SecretPlain "Shopify Custom App Client Secret"
+Write-Host ""
+Write-Host "Shopify вход за автоматизацията:" -ForegroundColor Cyan
+Write-Host "1 = Dev Dashboard app (Client ID + Client Secret) - препоръчително"
+Write-Host "2 = Съществуващ Admin API access token (ако вече имаш legacy custom app)"
+$shopMode = Read-Required "Избери 1 или 2" "1"
+
+Set-DotEnvValue "SHOPIFY_SHOP_DOMAIN" $shopDomain
+if ($shopMode -eq "2") {
+  $shopToken = Read-SecretPlain "Shopify Admin API access token"
+  Set-DotEnvValue "SHOPIFY_ACCESS_TOKEN" $shopToken
+  Set-DotEnvValue "SHOPIFY_CLIENT_ID" ""
+  Set-DotEnvValue "SHOPIFY_CLIENT_SECRET" ""
+} else {
+  $shopClientId = Read-Required "Shopify Dev Dashboard App Client ID"
+  $shopClientSecret = Read-SecretPlain "Shopify Dev Dashboard App Client Secret"
+  Set-DotEnvValue "SHOPIFY_ACCESS_TOKEN" ""
+  Set-DotEnvValue "SHOPIFY_CLIENT_ID" $shopClientId
+  Set-DotEnvValue "SHOPIFY_CLIENT_SECRET" $shopClientSecret
+}
 
 $fbPageId = Read-Required "Facebook Page ID" "1197473636784239"
 $fbToken = Read-SecretPlain "Facebook Page/System User access token (pages_manage_posts)"
-
-Set-DotEnvValue "SHOPIFY_SHOP_DOMAIN" $shopDomain
-Set-DotEnvValue "SHOPIFY_CLIENT_ID" $shopClientId
-Set-DotEnvValue "SHOPIFY_CLIENT_SECRET" $shopClientSecret
 Set-DotEnvValue "FACEBOOK_PAGE_ID" $fbPageId
 Set-DotEnvValue "FACEBOOK_PAGE_ACCESS_TOKEN" $fbToken
 Set-DotEnvValue "AUTO1_FEE_VAT_PERCENT" "22"
