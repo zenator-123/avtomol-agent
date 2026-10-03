@@ -45,7 +45,7 @@ Write-Host "No TinyFish/Windsor. AUTO1 uses your Chrome profile; Shopify and Fac
 Write-Host "Do not paste passwords or tokens into ChatGPT. Enter them only in this local window." -ForegroundColor Yellow
 Write-Host ""
 
-$shopDomain = Read-Required "Shopify *.myshopify.com domain"
+$shopDomain = Read-Required "Shopify *.myshopify.com domain" "0fqnjp-e2.myshopify.com"
 Write-Host ""
 Write-Host "Shopify authentication for automation:" -ForegroundColor Cyan
 Write-Host "1 = Dev Dashboard app (Client ID + Client Secret) - recommended"
