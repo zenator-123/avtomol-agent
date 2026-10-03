@@ -258,12 +258,17 @@ function normalizeVehicle(raw, sourceUrl = '') {
     'deliveryPrice', 'delivery_price', 'deliveryCost', 'delivery_cost',
     'logisticsPrice', 'logistics_price', 'logisticsCost', 'logistics_cost',
     'shippingPrice', 'shipping_price', 'shippingCost', 'shipping_cost',
-    'transportationPrice', 'transportation_price', 'transportationCost', 'transportation_cost'
+    'transportFee', 'transport_fee', 'deliveryFee', 'delivery_fee',
+    'logisticsFee', 'logistics_fee', 'shippingFee', 'shipping_fee',
+    'transportAmount', 'transport_amount', 'deliveryAmount', 'delivery_amount',
+    'transportationPrice', 'transportation_price', 'transportationCost', 'transportation_cost',
+    'transportationFee', 'transportation_fee'
   ]));
   const countryCode = normalizeCountryCode(pick(flat, [
     'purchaseCountry', 'purchase_country', 'countryOfPurchase', 'country_of_purchase',
     'countryCode', 'country_code', 'vehicleCountry', 'vehicle_country',
-    'locationCountry', 'location_country', 'carCountry', 'car_country', 'country'
+    'locationCountry', 'location_country', 'carCountry', 'car_country',
+    'carLocationCountry', 'car_location_country', 'vehicleLocationCountry', 'vehicle_location_country'
   ]));
   const pricing = calculatePublicPrice(auto1Price, transportEur, countryCode);
 
