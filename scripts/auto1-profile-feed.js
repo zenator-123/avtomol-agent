@@ -244,7 +244,8 @@ function mergeVehicle(a, b) {
 async function looksLoggedOut(page) {
   const body = await page.locator('body').innerText({ timeout: 5000 }).catch(() => '');
   const passwordCount = await page.locator('input[type="password"]').count().catch(() => 0);
-  return passwordCount > 0 || /\b(log in|sign in|anmelden|connexion|вход|влез)\b/i.test(body.slice(0, 6000));
+  const loginUrl = /login|sign-?in|auth|anmeld|connexion/i.test(page.url());
+  return passwordCount > 0 || (loginUrl && /\b(log in|sign in|anmelden|connexion|вход|влез)\b/i.test(body.slice(0, 6000)));
 }
 
 async function collectDomCards(page, collected) {
