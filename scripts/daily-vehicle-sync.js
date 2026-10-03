@@ -36,15 +36,18 @@ function normalizeVehicle(raw) {
     .map(String)
     .map((value) => value.trim())
     .filter((value, index, values) => /^https:\/\//i.test(value) && values.indexOf(value) === index);
+  const price = Number(pick(raw, ['price', 'priceValue', 'price_value']) || 0);
+  const pricingComplete = raw?.pricingComplete !== false && price > 0;
   return {
     incomingNumber,
-    available: !sold && directPurchase && !isUnroadworthy && retailReady,
+    available: !sold && directPurchase && !isUnroadworthy && retailReady && pricingComplete,
     directPurchase,
     isUnroadworthy,
     retailReady,
+    pricingComplete,
     title: String(pick(raw, ['title', 'name']) || '').trim(),
     descriptionHtml: String(pick(raw, ['descriptionHtml', 'description_html', 'description']) || '').trim(),
-    price: Number(pick(raw, ['price', 'priceValue', 'price_value']) || 0),
+    price,
     images: normalizedImages,
     brand: String(pick(raw, ['brand', 'make']) || '').trim(),
     model: String(pick(raw, ['model']) || '').trim(),
@@ -408,7 +411,8 @@ async function main() {
   const updates = [...available.values()].filter((vehicle) => existing.has(vehicle.incomingNumber));
   const facebookPosts = await facebookOrFallback('list posts', listFacebookPostsByIncomingNumber, new Map(), report.facebookFailures);
   if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
-  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
+  const pricingIncomplete = inventory.filter((vehicle) => !vehicle.pricingComplete).length;
+  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, pricingIncomplete, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
   if (ALLOW_DELETIONS) {
     for (const product of sold) {
@@ -444,6 +448,7 @@ async function main() {
   Object.assign(report, {
     finishedAt: new Date().toISOString(),
     inventory: inventory.length,
+    pricingIncomplete: inventory.filter((vehicle) => !vehicle.pricingComplete).length,
     existing: products.length,
     sold: sold.length,
     additions: additions.length,
