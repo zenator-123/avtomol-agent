@@ -3,3 +3,8 @@ node_modules/
 growth-output/
 work/
 *.log
+.auto1-profile/
+data/auto1-browser-config.json
+data/auto1-live-inventory.json
+daily-vehicle-sync-report.json
+vehicle-knowledge.json
