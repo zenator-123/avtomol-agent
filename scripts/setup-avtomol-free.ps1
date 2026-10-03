@@ -77,6 +77,27 @@ Set-DotEnvValue "ALLOW_ADDITIONS" "true"
 Set-DotEnvValue "ALLOW_UPDATES" "true"
 Set-DotEnvValue "SYNC_DRY_RUN" "false"
 
+# Also export credentials into this PowerShell process so the first npm sync
+# works immediately even on older Windows PowerShell versions with BOM/encoding quirks.
+$env:SHOPIFY_SHOP_DOMAIN = $shopDomain
+if ($shopMode -eq "2") {
+  $env:SHOPIFY_ACCESS_TOKEN = $shopToken
+  $env:SHOPIFY_CLIENT_ID = ""
+  $env:SHOPIFY_CLIENT_SECRET = ""
+} else {
+  $env:SHOPIFY_ACCESS_TOKEN = ""
+  $env:SHOPIFY_CLIENT_ID = $shopClientId
+  $env:SHOPIFY_CLIENT_SECRET = $shopClientSecret
+}
+$env:FACEBOOK_PAGE_ID = $fbPageId
+$env:FACEBOOK_PAGE_ACCESS_TOKEN = $fbToken
+$env:AUTO1_FEE_VAT_PERCENT = "22"
+$env:AUTO1_MIN_PROFIT_EUR = "500"
+$env:ALLOW_DELETIONS = "false"
+$env:ALLOW_ADDITIONS = "true"
+$env:ALLOW_UPDATES = "true"
+$env:SYNC_DRY_RUN = "false"
+
 Write-Host ""
 Write-Host "Checking Node.js / npm..." -ForegroundColor Cyan
 
