@@ -105,5 +105,5 @@ try {
 
 Write-Host ""
 Write-Host "DONE." -ForegroundColor Green
-Write-Host "AUTO1 -> цена с добавките -> Avtomol.com -> Facebook Avtomol.com"
+Write-Host "AUTO1 -> marked-up price -> Avtomol.com -> Facebook Avtomol.com"
 Write-Host "New vehicles: YES | Price updates: YES | Delete unavailable vehicles: NO"
