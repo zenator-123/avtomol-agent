@@ -169,6 +169,33 @@ function slug(value) {
   return String(value).normalize('NFKD').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '').toLowerCase().slice(0, 180);
 }
 
+let cachedOnlineStorePublicationId = '';
+async function getOnlineStorePublicationId() {
+  if (cachedOnlineStorePublicationId) return cachedOnlineStorePublicationId;
+  const data = await shopifyGraphql(`query AvtomolPublications {
+    publications(first: 50) { nodes { id name supportsFuturePublishing } }
+  }`);
+  const nodes = data.publications?.nodes || [];
+  const online = nodes.find((node) => /online store|онлайн магазин/i.test(String(node.name || '')))
+    || nodes.find((node) => node.supportsFuturePublishing === true)
+    || nodes[0];
+  if (!online?.id) throw new Error('Shopify Online Store publication was not found. Add read_publications/write_publications scopes.');
+  cachedOnlineStorePublicationId = online.id;
+  return cachedOnlineStorePublicationId;
+}
+
+async function publishProductToOnlineStore(productId) {
+  if (DRY_RUN) return;
+  const publicationId = await getOnlineStorePublicationId();
+  const data = await shopifyGraphql(`mutation PublishAvtomolVehicle($id: ID!, $publicationId: ID!) {
+    publishablePublish(id: $id, input: { publicationId: $publicationId }) {
+      userErrors { field message }
+    }
+  }`, { id: productId, publicationId });
+  const errors = data.publishablePublish?.userErrors || [];
+  if (errors.length) throw new Error(`Shopify publish rejected: ${JSON.stringify(errors)}`);
+}
+
 function vehicleDescription(vehicle) {
   const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Проверка на наличността във Viber</h3><p><strong>Изпратете във Viber на 0876 778 357 входящия номер на автомобила: ${vehicle.incomingNumber}.</strong></p><p>Ще потвърдим актуалната наличност, цената и следващите стъпки.</p><p><a href="/pages/zapitvane-za-avtomobil">Как да направя проверка</a></p></div>`;
   if (vehicle.descriptionHtml) {
@@ -204,6 +231,7 @@ async function createShopifyProduct(vehicle) {
   const errors = data.productCreate.userErrors;
   if (errors.length) throw new Error(`Shopify create rejected: ${JSON.stringify(errors)}`);
   const created = data.productCreate.product;
+  await publishProductToOnlineStore(created.id);
   if (vehicle.price > 0) {
     const variantId = created.variants.nodes[0]?.id;
     const update = await shopifyGraphql(`mutation PriceVehicle($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
