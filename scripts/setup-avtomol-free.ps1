@@ -18,7 +18,7 @@ function Set-DotEnvValue {
     } else { $line }
   }
   if (-not $found) { $out += "$Key=$Value" }
-  $out | Set-Content $EnvPath -Encoding UTF8
+  [System.IO.File]::WriteAllLines($EnvPath, [string[]]$out, (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Read-Required {
