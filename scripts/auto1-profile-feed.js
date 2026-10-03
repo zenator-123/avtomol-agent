@@ -145,8 +145,11 @@ const COUNTRY_CODE_ALIASES = Object.freeze({
 function normalizeCountryCode(value) {
   const text = String(value || '').trim();
   if (!text) return '';
-  const direct = text.toUpperCase().match(/\b(AT|BE|DE|DK|ES|FI|FR|IT|NL|PL|PT|SE)\b/)?.[1];
-  if (direct) return direct;
+  const compact = text.trim();
+  if (compact.length <= 12) {
+    const direct = compact.toUpperCase().match(/\b(AT|BE|DE|DK|ES|FI|FR|IT|NL|PL|PT|SE)\b/)?.[1];
+    if (direct) return direct;
+  }
   const normalized = text
     .normalize('NFKD')
     .replace(/\p{Diacritic}/gu, '')
@@ -210,8 +213,15 @@ function findCountryCode(flat, strings) {
   }
 
   for (const text of strings) {
-    const code = normalizeCountryCode(text);
-    if (code) return code;
+    const source = String(text || '');
+    const labeled = source.match(/(?:country|car\s*location|vehicle\s*location|location)[^A-Z]{0,30}\b(AT|BE|DE|DK|ES|FI|FR|IT|NL|PL|PT|SE)\b/i)?.[1];
+    if (labeled) return labeled.toUpperCase();
+    for (const [name, code] of Object.entries(COUNTRY_CODE_ALIASES)) {
+      if (String(name).length <= 2) continue;
+      const normalizedName = String(name).normalize('NFKD').replace(/\p{Diacritic}/gu, '').toUpperCase();
+      const normalizedText = source.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toUpperCase();
+      if (normalizedText.includes(normalizedName)) return code;
+    }
   }
   return '';
 }
@@ -483,6 +493,113 @@ async function collectDomCards(page, collected) {
   }
 }
 
+
+function parseLabeledMoney(text, labels) {
+  const source = String(text || '');
+  for (const label of labels) {
+    const re1 = new RegExp(label + '[^\\d€]{0,60}(?:€|EUR)?\\s*([\\d .,\u2019\\']+)', 'i');
+    const re2 = new RegExp('(?:€|EUR)\\s*([\\d .,\u2019\\']+)[^\\n]{0,60}' + label, 'i');
+    const m = source.match(re1) || source.match(re2);
+    const n = parseNumber(m?.[1] || 0);
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
+function parseCountryFromPageText(text) {
+  const source = String(text || '');
+  const labeled = source.match(/(?:country|car\\s*location|vehicle\\s*location|location|държава|местоположение)[^A-ZА-Я]{0,50}\\b(AT|BE|DE|DK|ES|FI|FR|IT|NL|PL|PT|SE)\\b/i)?.[1];
+  if (labeled) return labeled.toUpperCase();
+  const names = [
+    ['Austria','AT'],['Österreich','AT'],['Австрия','AT'],
+    ['Belgium','BE'],['Belgien','BE'],['Белгия','BE'],
+    ['Germany','DE'],['Deutschland','DE'],['Германия','DE'],
+    ['Denmark','DK'],['Danmark','DK'],['Дания','DK'],
+    ['Spain','ES'],['España','ES'],['Испания','ES'],
+    ['Finland','FI'],['Finnland','FI'],['Финландия','FI'],
+    ['France','FR'],['Frankreich','FR'],['Франция','FR'],
+    ['Italy','IT'],['Italia','IT'],['Italien','IT'],['Италия','IT'],
+    ['Netherlands','NL'],['Nederland','NL'],['Нидерландия','NL'],['Холандия','NL'],
+    ['Poland','PL'],['Polska','PL'],['Polen','PL'],['Полша','PL'],
+    ['Portugal','PT'],['Португалия','PT'],
+    ['Sweden','SE'],['Sverige','SE'],['Schweden','SE'],['Швеция','SE'],
+  ];
+  const folded = source.normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  for (const [name, code] of names) {
+    const n = String(name).normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+    if (folded.includes(n.toLowerCase())) return code;
+  }
+  return '';
+}
+
+async function enrichIncompletePricing(context, collected, attachResponseListener) {
+  const maxDetails = Math.max(0, Number(process.env.AUTO1_DETAIL_LIMIT || 60));
+  const targets = [...collected.values()]
+    .filter(v => !v.pricingComplete && /^https:\/\//i.test(String(v.sourceUrl || '')))
+    .slice(0, maxDetails);
+  if (!targets.length) return;
+
+  const detailPage = await context.newPage();
+  attachResponseListener(detailPage);
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const vehicle = targets[index];
+    const url = String(vehicle.sourceUrl || '');
+    if (!url || !/auto1\./i.test(url)) continue;
+    try {
+      console.log(\`DETAIL \${index + 1}/\${targets.length} \${vehicle.incomingNumber}\`);
+      await detailPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await sleep(Math.max(900, settleMs));
+      const body = await detailPage.locator('body').innerText({ timeout: 8000 }).catch(() => '');
+      const stock = String(body).toUpperCase().match(/\b[A-Z]{2}\d{5}\b/)?.[0] || vehicle.incomingNumber;
+      const auto1Price = Number(vehicle.auto1Price || 0) || parseLabeledMoney(body, [
+        'buy\\s*now(?:\\s*price)?',
+        'instant\\s*purchase(?:\\s*price)?',
+        'purchase\\s*price',
+        'fixed\\s*price',
+        'незабавна\\s*покупка',
+        'цена'
+      ]);
+      const transportEur = Number(vehicle.transportEur || 0) || parseLabeledMoney(body, [
+        'transport(?:ation)?(?:\\s*(?:price|cost|fee))?',
+        'delivery(?:\\s*(?:price|cost|fee))?',
+        'logistics?(?:\\s*(?:price|cost|fee))?',
+        'shipping(?:\\s*(?:price|cost|fee))?',
+        'транспорт',
+        'доставка'
+      ]);
+      const countryCode = vehicle.purchaseCountry || parseCountryFromPageText(body);
+      const pricing = calculatePublicPrice(auto1Price, transportEur, countryCode);
+
+      const candidate = {
+        ...vehicle,
+        incomingNumber: stock,
+        auto1Price,
+        transportEur,
+        purchaseCountry: countryCode,
+        documentFeeEur: pricing.documentFeeEur,
+        feeVatEur: pricing.feeVatEur,
+        profitEur: pricing.profitEur,
+        price: pricing.price,
+        pricingComplete: pricing.pricingComplete,
+        sourceUrl: url,
+      };
+
+      const images = await detailPage.locator('img').evaluateAll((nodes) => nodes
+        .map((img) => img.currentSrc || img.src)
+        .filter((src, i, arr) => /^https:\/\//i.test(src) && arr.indexOf(src) === i)
+        .slice(0, 40)).catch(() => []);
+      if (images.length > (candidate.images?.length || 0)) candidate.images = images;
+
+      collected.set(stock, mergeVehicle(collected.get(stock), candidate));
+    } catch (error) {
+      console.warn(\`::warning::DETAIL \${vehicle.incomingNumber} failed: \${error.message}\`);
+    }
+  }
+
+  await detailPage.close().catch(() => {});
+}
+
 async function scrollAndPaginate(page, collected) {
   let stable = 0;
   let lastCount = -1;
@@ -601,6 +718,7 @@ async function main() {
   await scrollAndPaginate(page, collected);
   await sleep(1000);
   await collectDomCards(page, collected);
+  await enrichIncompletePricing(context, collected, attachResponseListener);
 
   const vehicles = [...collected.values()]
     .filter(v => v.incomingNumber)
