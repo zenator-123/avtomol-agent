@@ -84,15 +84,38 @@ $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 $npmCmd = Get-Command npm -ErrorAction SilentlyContinue
 
 if (-not $nodeCmd -or -not $npmCmd) {
-  Write-Host "Node.js is not installed. Trying to install Node.js LTS with winget..." -ForegroundColor Yellow
+  Write-Host "Node.js is not installed." -ForegroundColor Yellow
   $winget = Get-Command winget -ErrorAction SilentlyContinue
-  if (-not $winget) {
-    Write-Host "winget was not found. Install Node.js LTS from https://nodejs.org/en/download and run this setup again." -ForegroundColor Red
-    throw "Node.js/npm missing"
-  }
 
-  winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
-  if ($LASTEXITCODE -ne 0) { throw "Node.js installation failed" }
+  if ($winget) {
+    Write-Host "Installing Node.js LTS with winget..." -ForegroundColor Yellow
+    winget install --id OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements
+    if ($LASTEXITCODE -ne 0) { throw "Node.js installation with winget failed" }
+  } else {
+    Write-Host "winget was not found. Downloading Node.js LTS directly from nodejs.org..." -ForegroundColor Yellow
+    $index = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" -UseBasicParsing
+    $release = $index | Where-Object { $_.lts -and ($_.files -contains "win-x64-msi") } | Select-Object -First 1
+    if (-not $release) { throw "Could not find a Windows x64 Node.js LTS installer" }
+
+    $version = [string]$release.version
+    $msiName = "node-$version-x64.msi"
+    $msiUrl = "https://nodejs.org/dist/$version/$msiName"
+    $msiPath = Join-Path $env:TEMP $msiName
+
+    Write-Host ("Downloading " + $msiUrl) -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath -UseBasicParsing
+
+    $sig = Get-AuthenticodeSignature $msiPath
+    if ($sig.Status -ne "Valid") {
+      Remove-Item $msiPath -Force -ErrorAction SilentlyContinue
+      throw "Downloaded Node.js installer signature is not valid"
+    }
+
+    Write-Host "Windows may ask for administrator permission. Choose Yes." -ForegroundColor Yellow
+    $proc = Start-Process -FilePath "msiexec.exe" -ArgumentList @("/i", ('"' + $msiPath + '"'), "/qn", "/norestart") -Verb RunAs -Wait -PassThru
+    Remove-Item $msiPath -Force -ErrorAction SilentlyContinue
+    if ($proc.ExitCode -ne 0) { throw ("Node.js installer failed with exit code " + $proc.ExitCode) }
+  }
 
   $env:Path = [Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [Environment]::GetEnvironmentVariable("Path","User")
   $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
