@@ -163,6 +163,59 @@ function normalizeCountryCode(value) {
   return '';
 }
 
+
+function findTransportEur(flat, strings) {
+  const direct = parseNumber(pick(flat, [
+    'transportPrice', 'transport_price', 'transportCost', 'transport_cost',
+    'deliveryPrice', 'delivery_price', 'deliveryCost', 'delivery_cost',
+    'logisticsPrice', 'logistics_price', 'logisticsCost', 'logistics_cost',
+    'shippingPrice', 'shipping_price', 'shippingCost', 'shipping_cost',
+    'transportFee', 'transport_fee', 'deliveryFee', 'delivery_fee',
+    'logisticsFee', 'logistics_fee', 'shippingFee', 'shipping_fee',
+    'transportAmount', 'transport_amount', 'deliveryAmount', 'delivery_amount',
+    'transportationPrice', 'transportation_price', 'transportationCost', 'transportation_cost',
+    'transportationFee', 'transportation_fee'
+  ]));
+  if (direct > 0) return direct;
+
+  const candidates = [];
+  for (const item of flat) {
+    if (!/(transport|delivery|logistic|shipping|freight)/i.test(item.nk)) continue;
+    const n = parseNumber(item.value);
+    if (n >= 50 && n <= 5000) candidates.push(n);
+  }
+  if (candidates.length) return Math.max(...candidates);
+
+  for (const text of strings) {
+    const m = String(text).match(/(?:transport|delivery|logistics?|shipping|freight)[^€\d]{0,40}(?:€|EUR)?\s*([\d .,'’]+)|(?:€|EUR)\s*([\d .,'’]+)[^\n]{0,40}(?:transport|delivery|logistics?|shipping|freight)/i);
+    const n = parseNumber(m?.[1] || m?.[2] || 0);
+    if (n >= 50 && n <= 5000) return n;
+  }
+  return 0;
+}
+
+function findCountryCode(flat, strings) {
+  const direct = normalizeCountryCode(pick(flat, [
+    'purchaseCountry', 'purchase_country', 'countryOfPurchase', 'country_of_purchase',
+    'countryCode', 'country_code', 'vehicleCountry', 'vehicle_country',
+    'locationCountry', 'location_country', 'carCountry', 'car_country',
+    'carLocationCountry', 'car_location_country', 'vehicleLocationCountry', 'vehicle_location_country'
+  ]));
+  if (direct) return direct;
+
+  for (const item of flat) {
+    if (!/(country|location|site|branch)/i.test(item.nk)) continue;
+    const code = normalizeCountryCode(item.value);
+    if (code) return code;
+  }
+
+  for (const text of strings) {
+    const code = normalizeCountryCode(text);
+    if (code) return code;
+  }
+  return '';
+}
+
 function calculatePublicPrice(auto1Price, transportEur, countryCode) {
   const documentFeeEur = DOCUMENT_FEE_BY_COUNTRY_EUR[countryCode] || 0;
   const vatPercent = Number(process.env.AUTO1_FEE_VAT_PERCENT || 22);
@@ -253,23 +306,8 @@ function normalizeVehicle(raw, sourceUrl = '') {
     'buyNowPrice', 'instantBuyPrice', 'purchasePrice', 'purchase_price',
     'salesPrice', 'grossPrice', 'price', 'amount'
   ]));
-  const transportEur = parseNumber(pick(flat, [
-    'transportPrice', 'transport_price', 'transportCost', 'transport_cost',
-    'deliveryPrice', 'delivery_price', 'deliveryCost', 'delivery_cost',
-    'logisticsPrice', 'logistics_price', 'logisticsCost', 'logistics_cost',
-    'shippingPrice', 'shipping_price', 'shippingCost', 'shipping_cost',
-    'transportFee', 'transport_fee', 'deliveryFee', 'delivery_fee',
-    'logisticsFee', 'logistics_fee', 'shippingFee', 'shipping_fee',
-    'transportAmount', 'transport_amount', 'deliveryAmount', 'delivery_amount',
-    'transportationPrice', 'transportation_price', 'transportationCost', 'transportation_cost',
-    'transportationFee', 'transportation_fee'
-  ]));
-  const countryCode = normalizeCountryCode(pick(flat, [
-    'purchaseCountry', 'purchase_country', 'countryOfPurchase', 'country_of_purchase',
-    'countryCode', 'country_code', 'vehicleCountry', 'vehicle_country',
-    'locationCountry', 'location_country', 'carCountry', 'car_country',
-    'carLocationCountry', 'car_location_country', 'vehicleLocationCountry', 'vehicle_location_country'
-  ]));
+  const transportEur = findTransportEur(flat, strings);
+  const countryCode = findCountryCode(flat, strings);
   const pricing = calculatePublicPrice(auto1Price, transportEur, countryCode);
 
   const mileage = String(pick(flat, ['mileage', 'odometer', 'mileageKm', 'mileage_km']) || '')
