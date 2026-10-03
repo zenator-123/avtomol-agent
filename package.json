@@ -9,6 +9,12 @@
     "learn:vehicles": "node scripts/learn-vehicles.js",
     "start": "node server.js",
     "test": "node --test",
-    "growth:run": "node scripts/growth-agent.js"
+    "growth:run": "node scripts/growth-agent.js",
+    "auto1:setup": "node scripts/auto1-profile-feed.js --setup",
+    "auto1:fetch": "node scripts/auto1-profile-feed.js",
+    "auto1:sync": "node scripts/auto1-sync-runner.js"
+  },
+  "dependencies": {
+    "playwright-core": "^1.55.0"
   }
 }
