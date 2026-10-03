@@ -111,6 +111,98 @@ function parseNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+
+const DOCUMENT_FEE_BY_COUNTRY_EUR = Object.freeze({
+  AT: 478,
+  BE: 458,
+  DE: 458,
+  DK: 418,
+  ES: 544,
+  FI: 378,
+  FR: 428,
+  IT: 638,
+  NL: 484,
+  PL: 288,
+  PT: 418,
+  SE: 471,
+});
+
+const COUNTRY_CODE_ALIASES = Object.freeze({
+  AT: 'AT', AUSTRIA: 'AT', OSTERREICH: 'AT', 'ÖSTERREICH': 'AT', АВСТРИЯ: 'AT',
+  BE: 'BE', BELGIUM: 'BE', BELGIQUE: 'BE', BELGIE: 'BE', BELGIEN: 'BE', БЕЛГИЯ: 'BE',
+  DE: 'DE', GERMANY: 'DE', DEUTSCHLAND: 'DE', ALLEMAGNE: 'DE', ГЕРМАНИЯ: 'DE',
+  DK: 'DK', DENMARK: 'DK', DANMARK: 'DK', DANEMARK: 'DK', ДАНИЯ: 'DK',
+  ES: 'ES', SPAIN: 'ES', ESPANA: 'ES', 'ESPAÑA': 'ES', SPANIEN: 'ES', ИСПАНИЯ: 'ES',
+  FI: 'FI', FINLAND: 'FI', FINNLAND: 'FI', FINLANDE: 'FI', ФИНЛАНДИЯ: 'FI',
+  FR: 'FR', FRANCE: 'FR', FRANKREICH: 'FR', ФРАНЦИЯ: 'FR',
+  IT: 'IT', ITALY: 'IT', ITALIA: 'IT', ITALIEN: 'IT', ИТАЛИЯ: 'IT',
+  NL: 'NL', NETHERLANDS: 'NL', HOLLAND: 'NL', NEDERLAND: 'NL', NIEDERLANDE: 'NL', НИДЕРЛАНДИЯ: 'NL', ХОЛАНДИЯ: 'NL',
+  PL: 'PL', POLAND: 'PL', POLSKA: 'PL', POLEN: 'PL', ПОЛША: 'PL',
+  PT: 'PT', PORTUGAL: 'PT', PORTUGALSKA: 'PT', ПОРТУГАЛИЯ: 'PT',
+  SE: 'SE', SWEDEN: 'SE', SVERIGE: 'SE', SCHWEDEN: 'SE', ШВЕЦИЯ: 'SE',
+});
+
+function normalizeCountryCode(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const direct = text.toUpperCase().match(/\b(AT|BE|DE|DK|ES|FI|FR|IT|NL|PL|PT|SE)\b/)?.[1];
+  if (direct) return direct;
+  const normalized = text
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toUpperCase()
+    .replace(/[^\p{L}]+/gu, ' ')
+    .trim();
+  for (const [name, code] of Object.entries(COUNTRY_CODE_ALIASES)) {
+    const n = String(name)
+      .normalize('NFKD')
+      .replace(/\p{Diacritic}/gu, '')
+      .toUpperCase();
+    if (normalized.includes(n)) return code;
+  }
+  return '';
+}
+
+function calculatePublicPrice(auto1Price, transportEur, countryCode) {
+  const documentFeeEur = DOCUMENT_FEE_BY_COUNTRY_EUR[countryCode] || 0;
+  const vatPercent = Number(process.env.AUTO1_FEE_VAT_PERCENT || 22);
+  const minimumProfitEur = Math.max(500, Number(process.env.AUTO1_MIN_PROFIT_EUR || 500));
+  const extraProfitEur = Math.max(0, Number(process.env.AUTO1_EXTRA_PROFIT_EUR || 0));
+
+  const pricingComplete = auto1Price > 0
+    && transportEur > 0
+    && documentFeeEur > 0
+    && Number.isFinite(vatPercent);
+
+  if (!pricingComplete) {
+    return {
+      pricingComplete: false,
+      price: 0,
+      auto1Price,
+      transportEur,
+      countryCode,
+      documentFeeEur,
+      feeVatEur: 0,
+      profitEur: minimumProfitEur + extraProfitEur,
+    };
+  }
+
+  const feeVatEur = (transportEur + documentFeeEur) * vatPercent / 100;
+  const profitEur = minimumProfitEur + extraProfitEur;
+  const price = Math.round((auto1Price + transportEur + documentFeeEur + feeVatEur + profitEur) * 100) / 100;
+
+  return {
+    pricingComplete: true,
+    price,
+    auto1Price,
+    transportEur,
+    countryCode,
+    documentFeeEur,
+    feeVatEur: Math.round(feeVatEur * 100) / 100,
+    profitEur,
+  };
+}
+
 function extractStock(flat, strings) {
   const direct = pick(flat, [
     'incomingNumber', 'incoming_number', 'stockNumber', 'stock_number',
@@ -157,10 +249,23 @@ function normalizeVehicle(raw, sourceUrl = '') {
   if (!title && (brand || model)) title = [brand, model, year].filter(Boolean).join(' ');
   if (!title) title = incomingNumber;
 
-  const price = parseNumber(pick(flat, [
-    'buyNowPrice', 'instantBuyPrice', 'purchasePrice', 'salesPrice',
-    'grossPrice', 'price', 'amount'
+  const auto1Price = parseNumber(pick(flat, [
+    'buyNowPrice', 'instantBuyPrice', 'purchasePrice', 'purchase_price',
+    'salesPrice', 'grossPrice', 'price', 'amount'
   ]));
+  const transportEur = parseNumber(pick(flat, [
+    'transportPrice', 'transport_price', 'transportCost', 'transport_cost',
+    'deliveryPrice', 'delivery_price', 'deliveryCost', 'delivery_cost',
+    'logisticsPrice', 'logistics_price', 'logisticsCost', 'logistics_cost',
+    'shippingPrice', 'shipping_price', 'shippingCost', 'shipping_cost',
+    'transportationPrice', 'transportation_price', 'transportationCost', 'transportation_cost'
+  ]));
+  const countryCode = normalizeCountryCode(pick(flat, [
+    'purchaseCountry', 'purchase_country', 'countryOfPurchase', 'country_of_purchase',
+    'countryCode', 'country_code', 'vehicleCountry', 'vehicle_country',
+    'locationCountry', 'location_country', 'carCountry', 'car_country', 'country'
+  ]));
+  const pricing = calculatePublicPrice(auto1Price, transportEur, countryCode);
 
   const mileage = String(pick(flat, ['mileage', 'odometer', 'mileageKm', 'mileage_km']) || '')
     .replace(/[^\d]/g, '');
@@ -191,7 +296,14 @@ function normalizeVehicle(raw, sourceUrl = '') {
     status: sold ? 'unavailable' : 'available',
     title,
     description: extraText.join('\n\n'),
-    price,
+    price: pricing.price,
+    pricingComplete: pricing.pricingComplete,
+    auto1Price: pricing.auto1Price,
+    transportEur: pricing.transportEur,
+    purchaseCountry: pricing.countryCode,
+    documentFeeEur: pricing.documentFeeEur,
+    feeVatEur: pricing.feeVatEur,
+    profitEur: pricing.profitEur,
     images,
     brand,
     model,
@@ -226,17 +338,42 @@ function walkCandidates(value, sourceUrl, out, depth = 0) {
 function mergeVehicle(a, b) {
   if (!a) return b;
   const merged = { ...a };
+
+  const aPricing = a.pricingComplete === true;
+  const bPricing = b.pricingComplete === true;
+
   for (const [key, value] of Object.entries(b)) {
+    if (key === 'pricingComplete') {
+      merged.pricingComplete = aPricing || bPricing;
+      continue;
+    }
+    if (
+      ['price', 'auto1Price', 'transportEur', 'purchaseCountry', 'documentFeeEur', 'feeVatEur', 'profitEur'].includes(key)
+      && aPricing && !bPricing
+    ) {
+      continue;
+    }
     if (Array.isArray(value)) {
       if (value.length > (merged[key]?.length || 0)) merged[key] = value;
     } else if (typeof value === 'string') {
       if (value && (!merged[key] || value.length > String(merged[key]).length)) merged[key] = value;
     } else if (typeof value === 'number') {
-      if (value > 0) merged[key] = value;
+      if (value > 0 || (key === 'price' && bPricing)) merged[key] = value;
     } else if (typeof value === 'boolean') {
       merged[key] = value;
     }
   }
+
+  if (bPricing) {
+    merged.price = b.price;
+    merged.auto1Price = b.auto1Price;
+    merged.transportEur = b.transportEur;
+    merged.purchaseCountry = b.purchaseCountry;
+    merged.documentFeeEur = b.documentFeeEur;
+    merged.feeVatEur = b.feeVatEur;
+    merged.profitEur = b.profitEur;
+  }
+
   if (b.status === 'unavailable') merged.status = 'unavailable';
   return merged;
 }
@@ -277,7 +414,15 @@ async function collectDomCards(page, collected) {
       status: 'available',
       title: title || row.stock,
       description: row.text,
-      price: parseNumber(priceText?.[1] || priceText?.[2] || 0),
+      // DOM cards often expose only the raw AUTO1 price. Never publish that.
+      price: 0,
+      pricingComplete: false,
+      auto1Price: parseNumber(priceText?.[1] || priceText?.[2] || 0),
+      transportEur: 0,
+      purchaseCountry: '',
+      documentFeeEur: 0,
+      feeVatEur: 0,
+      profitEur: Math.max(500, Number(process.env.AUTO1_MIN_PROFIT_EUR || 500)),
       images: row.images.filter((v, i, arr) => arr.indexOf(v) === i).slice(0, 40),
       brand: '',
       model: '',
