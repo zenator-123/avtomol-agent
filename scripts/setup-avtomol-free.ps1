@@ -41,16 +41,16 @@ function Read-SecretPlain {
 
 Write-Host ""
 Write-Host "=== Avtomol FREE local automation setup ===" -ForegroundColor Cyan
-Write-Host "Без TinyFish/Windsor. AUTO1 през твоя Chrome профил; Shopify и Facebook през директните им API."
-Write-Host "Не поставяй пароли или токени в ChatGPT. Въвеждай ги само тук." -ForegroundColor Yellow
+Write-Host "No TinyFish/Windsor. AUTO1 uses your Chrome profile; Shopify and Facebook use direct APIs."
+Write-Host "Do not paste passwords or tokens into ChatGPT. Enter them only in this local window." -ForegroundColor Yellow
 Write-Host ""
 
-$shopDomain = Read-Required "Shopify *.myshopify.com домейн"
+$shopDomain = Read-Required "Shopify *.myshopify.com domain"
 Write-Host ""
-Write-Host "Shopify вход за автоматизацията:" -ForegroundColor Cyan
-Write-Host "1 = Dev Dashboard app (Client ID + Client Secret) - препоръчително"
-Write-Host "2 = Съществуващ Admin API access token (ако вече имаш legacy custom app)"
-$shopMode = Read-Required "Избери 1 или 2" "1"
+Write-Host "Shopify authentication for automation:" -ForegroundColor Cyan
+Write-Host "1 = Dev Dashboard app (Client ID + Client Secret) - recommended"
+Write-Host "2 = Existing Admin API access token (legacy custom app)"
+$shopMode = Read-Required "Choose 1 or 2" "1"
 
 Set-DotEnvValue "SHOPIFY_SHOP_DOMAIN" $shopDomain
 if ($shopMode -eq "2") {
@@ -78,25 +78,25 @@ Set-DotEnvValue "ALLOW_UPDATES" "true"
 Set-DotEnvValue "SYNC_DRY_RUN" "false"
 
 Write-Host ""
-Write-Host "Инсталирам Node зависимостите..." -ForegroundColor Cyan
+Write-Host "Installing Node dependencies..." -ForegroundColor Cyan
 Push-Location $Repo
 try {
   npm install --ignore-scripts --no-package-lock
   if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
 
   Write-Host ""
-  Write-Host "Сега ще се отвори Chrome за еднократен AUTO1 вход." -ForegroundColor Cyan
-  Write-Host "Влез в AUTO1, отвори Instant Purchase / Незабавна покупка и натисни ENTER в конзолата." -ForegroundColor Yellow
+  Write-Host "Chrome will open for the one-time AUTO1 login." -ForegroundColor Cyan
+  Write-Host "Log in to AUTO1, open Instant Purchase, then press ENTER in this console." -ForegroundColor Yellow
   npm run auto1:setup
   if ($LASTEXITCODE -ne 0) { throw "AUTO1 setup failed" }
 
   Write-Host ""
-  Write-Host "Пускам първа реална синхронизация..." -ForegroundColor Cyan
+  Write-Host "Starting the first real synchronization..." -ForegroundColor Cyan
   npm run auto1:sync
   if ($LASTEXITCODE -ne 0) { throw "First sync failed" }
 
   Write-Host ""
-  Write-Host "Инсталирам ежедневната задача за $TaskTime..." -ForegroundColor Cyan
+  Write-Host "Installing the daily task for $TaskTime..." -ForegroundColor Cyan
   powershell -ExecutionPolicy Bypass -File (Join-Path $Repo "scripts\install-auto1-task.ps1") -Time $TaskTime
   if ($LASTEXITCODE -ne 0) { throw "Scheduled task install failed" }
 } finally {
@@ -104,6 +104,6 @@ try {
 }
 
 Write-Host ""
-Write-Host "ГОТОВО." -ForegroundColor Green
+Write-Host "DONE." -ForegroundColor Green
 Write-Host "AUTO1 -> цена с добавките -> Avtomol.com -> Facebook Avtomol.com"
-Write-Host "Нови автомобили: ДА | Обновяване на цена: ДА | Изтриване на неналични: НЕ"
+Write-Host "New vehicles: YES | Price updates: YES | Delete unavailable vehicles: NO"
