@@ -50,6 +50,7 @@ function normalizeVehicle(raw) {
   return {
     incomingNumber,
     available,
+    sourceUnavailable: sold,
     directPurchase,
     isUnroadworthy,
     vatDeductible,
@@ -268,7 +269,7 @@ async function createShopifyProduct(vehicle) {
     handle: vehicle.handle || slug(`${vehicle.title}-${vehicle.incomingNumber}`),
     descriptionHtml: vehicleDescription(vehicle),
     vendor: 'AvtoMol.com',
-    productType: 'Автомобили',
+    productType: 'Автомобили втора употреба',
     status: 'ACTIVE',
     tags: ['vehicle-sync', `incoming-${vehicle.incomingNumber}`],
     metafields: [{ namespace: 'custom', key: 'incoming_number', type: 'single_line_text_field', value: vehicle.incomingNumber }],
@@ -314,12 +315,39 @@ async function updateShopifyProductContent(product, vehicle) {
       id: product.id,
       title: vehicle.title,
       descriptionHtml,
+      productType: 'Автомобили втора употреба',
       status: 'ACTIVE',
       tags: ['vehicle-sync', `incoming-${vehicle.incomingNumber}`],
     },
   });
   if (data.productUpdate.userErrors.length) {
     throw new Error(`Shopify content update rejected: ${JSON.stringify(data.productUpdate.userErrors)}`);
+  }
+  return true;
+}
+
+async function markShopifyProductSold(product) {
+  const cleanTitle = String(product.title || '').replace(/^ПРОДАДЕНО\s*[—-]\s*/i, '').trim();
+  const soldTitle = `ПРОДАДЕНО — ${cleanTitle}`;
+  const withoutOldSold = String(product.descriptionHtml || '').replace(/<div[^>]*data-avtomol-sold=["']1["'][^>]*>[\s\S]*?<\/div>/i, '').trim();
+  const soldBox = '<div data-avtomol-sold="1" style="margin:0 0 18px;padding:18px;border:4px solid #d40000;background:#fff3f3;color:#d40000;font-size:34px;line-height:1.2;font-weight:900;text-align:center">ПРОДАДЕНО</div>';
+  const descriptionHtml = soldBox + withoutOldSold;
+  if (product.title === soldTitle && String(product.descriptionHtml || '').includes('data-avtomol-sold="1"')) return false;
+  if (DRY_RUN) return true;
+  const data = await shopifyGraphql(`mutation MarkVehicleSold($product: ProductUpdateInput!) {
+    productUpdate(product: $product) { userErrors { field message } }
+  }`, {
+    product: {
+      id: product.id,
+      title: soldTitle,
+      descriptionHtml,
+      productType: 'Автомобили втора употреба',
+      status: 'ACTIVE',
+      tags: ['vehicle-sync', `incoming-${product.incomingNumber}`, 'продадено'],
+    },
+  });
+  if (data.productUpdate.userErrors.length) {
+    throw new Error(`Shopify sold marker rejected: ${JSON.stringify(data.productUpdate.userErrors)}`);
   }
   return true;
 }
@@ -505,13 +533,20 @@ async function main() {
     .filter((vehicle) => vehicle.available)
     .sort((a, b) => vehiclePriority(b) - vehiclePriority(a));
   const available = new Map(eligibleVehicles.map((vehicle) => [vehicle.incomingNumber, vehicle]));
+  const allInventoryByStock = new Map(inventory.map((vehicle) => [vehicle.incomingNumber, vehicle]));
+  const explicitlyUnavailable = new Set(
+    inventory.filter((vehicle) => vehicle.sourceUnavailable === true).map((vehicle) => vehicle.incomingNumber)
+  );
   const products = await listManagedProducts(eligibleVehicles);
   const existing = new Map(products.map((product) => [product.incomingNumber, product]));
-  const sold = products.filter((product) => !available.has(product.incomingNumber));
+  const sold = products.filter((product) => {
+    if (explicitlyUnavailable.has(product.incomingNumber)) return true;
+    if (knowledge.completeAuto1Catalog && !allInventoryByStock.has(product.incomingNumber)) return true;
+    return false;
+  });
   const additions = eligibleVehicles.filter((vehicle) => !existing.has(vehicle.incomingNumber));
   const updates = eligibleVehicles.filter((vehicle) => existing.has(vehicle.incomingNumber));
   const facebookPosts = await facebookOrFallback('list posts', listFacebookPostsByIncomingNumber, new Map(), report.facebookFailures);
-  if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
   const pricingIncomplete = inventory.filter((vehicle) => !vehicle.pricingComplete).length;
   const rejected = inventory.filter((vehicle) => !vehicle.available).reduce((acc, vehicle) => {
     const reason = eligibilityReason(vehicle);
@@ -520,14 +555,11 @@ async function main() {
   }, {});
   console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, eligible: eligibleVehicles.length, rejected, pricingIncomplete, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
-  if (ALLOW_DELETIONS) {
+  if (sold.length) {
     for (const product of sold) {
-      console.log(`${DRY_RUN ? 'WOULD DELETE' : 'DELETE'} ${product.incomingNumber} ${product.title}`);
-      await facebookOrFallback(`delete ${product.incomingNumber}`, () => deleteFacebookPost(product.facebookPostId), undefined, report.facebookFailures);
-      await deleteShopifyProduct(product);
+      const changed = await markShopifyProductSold(product);
+      console.log(`${DRY_RUN ? 'WOULD MARK SOLD' : 'MARK SOLD'} ${product.incomingNumber} ShopifySold=${changed}`);
     }
-  } else if (sold.length) {
-    console.log(`SKIP ${sold.length} deletions because ALLOW_DELETIONS is false`);
   }
   if (ALLOW_UPDATES) {
     for (const vehicle of updates) {
@@ -576,5 +608,5 @@ if (require.main === module) main().catch(async (error) => {
   try { await fs.writeFile(REPORT_PATH, JSON.stringify({ startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), fatal: error.message }, null, 2) + '\n', 'utf8'); } catch {}
   process.exitCode = 1;
 });
-module.exports = { normalizeVehicle, vehicleDescription, vehiclePriority, eligibilityReason, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, updateShopifyProductContent, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
+module.exports = { normalizeVehicle, vehicleDescription, vehiclePriority, eligibilityReason, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, updateShopifyProductContent, markShopifyProductSold, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
 
