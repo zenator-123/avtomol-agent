@@ -30,7 +30,11 @@ function normalizeVehicle(raw) {
   const directPurchase = raw?.directPurchase === true || /instant|direct|fixed|незабавна|директна|фиксирана/.test(purchaseType);
   const isUnroadworthy = raw?.isUnroadworthy === true || raw?.unroadworthy === true;
   const retailState = String(pick(raw, ['retailState', 'retail_state', 'readiness', 'condition']) || '').toLowerCase();
-  const retailReady = raw?.retailReady === true || /retail[\s_-]*ready|готов.*продажба.*дребно/.test(retailState);
+  const retailReady = raw?.retailReady === true || /retail[\s_-]*ready|ready[\s_-]*for[\s_-]*retail|готов.*продажба.*дребно/.test(retailState);
+  const vatDeductible = raw?.vatDeductible === true;
+  const accidentFree = raw?.accidentFree === true;
+  const drivable = raw?.drivable === true;
+  const engineOk = raw?.engineOk === true;
   const normalizedImages = (Array.isArray(images) ? images : String(images).split(','))
     .map((image) => typeof image === 'string' ? image : image?.url || image?.src || image?.originalSource)
     .map(String)
@@ -38,12 +42,22 @@ function normalizeVehicle(raw) {
     .filter((value, index, values) => /^https:\/\//i.test(value) && values.indexOf(value) === index);
   const price = Number(pick(raw, ['price', 'priceValue', 'price_value']) || 0);
   const pricingComplete = raw?.pricingComplete !== false && price > 0;
+  const mileageText = String(pick(raw, ['mileage', 'auto_mileage']) || '').trim();
+  const mileageKm = Number(mileageText.replace(/[^\d]/g, '') || 0);
+  const withinMileageLimit = mileageKm > 0 && mileageKm <= 25000;
+  const safeCondition = accidentFree && drivable && engineOk && !isUnroadworthy;
+  const available = !sold && directPurchase && pricingComplete && withinMileageLimit && safeCondition;
   return {
     incomingNumber,
-    available: !sold && directPurchase && !isUnroadworthy && retailReady && pricingComplete,
+    available,
     directPurchase,
     isUnroadworthy,
+    vatDeductible,
     retailReady,
+    accidentFree,
+    drivable,
+    engineOk,
+    withinMileageLimit,
     pricingComplete,
     title: String(pick(raw, ['title', 'name']) || '').trim(),
     descriptionHtml: String(pick(raw, ['descriptionHtml', 'description_html', 'description']) || '').trim(),
@@ -52,11 +66,28 @@ function normalizeVehicle(raw) {
     brand: String(pick(raw, ['brand', 'make']) || '').trim(),
     model: String(pick(raw, ['model']) || '').trim(),
     year: String(pick(raw, ['year', 'makeYear', 'auto_make_year']) || '').trim(),
-    mileage: String(pick(raw, ['mileage', 'auto_mileage']) || '').trim(),
+    mileage: mileageText,
+    mileageKm,
     fuel: String(pick(raw, ['fuel', 'engineType', 'auto_engine_type']) || '').trim(),
     transmission: String(pick(raw, ['transmission', 'auto_transmission_type']) || '').trim(),
     handle: String(pick(raw, ['handle', 'productHandle', 'product_handle']) || '').trim(),
   };
+}
+
+function vehiclePriority(vehicle) {
+  return (vehicle.vatDeductible ? 100 : 0)
+    + (vehicle.retailReady ? 50 : 0)
+    + Math.max(0, 25000 - Number(vehicle.mileageKm || 25000)) / 25000;
+}
+
+function eligibilityReason(vehicle) {
+  if (!vehicle.pricingComplete) return 'incomplete-price';
+  if (!vehicle.directPurchase) return 'not-direct-purchase';
+  if (!vehicle.withinMileageLimit) return 'mileage-over-25000-or-missing';
+  if (!vehicle.accidentFree) return 'accident-status-not-confirmed-free';
+  if (!vehicle.drivable || vehicle.isUnroadworthy) return 'not-confirmed-drivable';
+  if (!vehicle.engineOk) return 'engine-condition-not-confirmed-good';
+  return vehicle.available ? 'eligible' : 'unavailable';
 }
 
 async function loadInventory() {
@@ -137,7 +168,7 @@ async function listManagedProducts(vehicles = []) {
   do {
     const data = await shopifyGraphql(`query ManagedVehicles($cursor: String, $query: String!) {
       products(first: 100, after: $cursor, query: $query) {
-        nodes { id title handle variants(first: 1) { nodes { id price } }
+        nodes { id title handle descriptionHtml variants(first: 1) { nodes { id price } }
           metafield(namespace: "custom", key: "incoming_number") { value }
           facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } }
         pageInfo { hasNextPage endCursor }
@@ -150,7 +181,7 @@ async function listManagedProducts(vehicles = []) {
   for (const vehicle of vehicles) {
     if (!vehicle.handle || knownHandles.has(vehicle.handle)) continue;
     const data = await shopifyGraphql(`query VehicleByHandle($query: String!) {
-      products(first: 1, query: $query) { nodes { id title handle variants(first: 1) { nodes { id price } }
+      products(first: 1, query: $query) { nodes { id title handle descriptionHtml variants(first: 1) { nodes { id price } }
         metafield(namespace: "custom", key: "incoming_number") { value }
         facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } } }
     }`, { query: `handle:${vehicle.handle}` });
@@ -196,20 +227,38 @@ async function publishProductToOnlineStore(productId) {
   if (errors.length) throw new Error(`Shopify publish rejected: ${JSON.stringify(errors)}`);
 }
 
+function cleanSourceDescription(value) {
+  return String(value || '')
+    .replace(/AUTO1:\s*https?:\/\/\S+/gi, '')
+    .replace(/https?:\/\/[^\s<]*auto1[^\s<]*/gi, '')
+    .replace(/(?:AUTO1|auto1\.com)/gi, '')
+    .replace(/(^|<br\s*\/?>|<p>)[^<]*(?:buy\s*now\s*price|purchase\s*price|transport\s*(?:cost|price|fee)|document\s*fee|landed\s*cost|profit|markup|крайна\s*цена|цена\s*auto)[^<]*(?:<\/p>)?/gi, '$1')
+    .trim();
+}
+
 function vehicleDescription(vehicle) {
-  const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Проверка на наличността във Viber</h3><p><strong>Изпратете във Viber на 0876 778 357 входящия номер на автомобила: ${vehicle.incomingNumber}.</strong></p><p>Ще потвърдим актуалната наличност, цената и следващите стъпки.</p><p><a href="/pages/zapitvane-za-avtomobil">Как да направя проверка</a></p></div>`;
-  if (vehicle.descriptionHtml) {
-    if (/Проверка на наличността във Viber|Изпратете във Viber на 0876 778 357/i.test(vehicle.descriptionHtml)) return vehicle.descriptionHtml;
-    return viberBox + vehicle.descriptionHtml;
-  }
   const facts = [
     ['Марка', vehicle.brand], ['Модел', vehicle.model], ['Година', vehicle.year],
-    ['Пробег', vehicle.mileage], ['Гориво', vehicle.fuel], ['Скоростна кутия', vehicle.transmission],
+    ['Пробег', vehicle.mileage ? `${vehicle.mileage} км` : ''],
+    ['Гориво', vehicle.fuel], ['Скоростна кутия', vehicle.transmission],
   ].filter(([, value]) => value);
-  return viberBox
-    + `<div style="border:2px solid #d40000;padding:14px;color:#d40000;font-size:24px;font-weight:700">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
-    + `<h2>${vehicle.title}</h2><ul>${facts.map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}</ul>`
-    + '<p>Предлагаме проверени автомобили от Европа и авточасти за всички видове автомобили.</p>';
+
+  const priorityBadges = [
+    vehicle.vatDeductible ? '<span style="display:inline-block;margin:4px 8px 4px 0;padding:8px 12px;border-radius:6px;background:#e8f7ea;font-weight:700">✓ Възстановяемо ДДС</span>' : '',
+    vehicle.retailReady ? '<span style="display:inline-block;margin:4px 8px 4px 0;padding:8px 12px;border-radius:6px;background:#e8f1ff;font-weight:700">✓ Готов за продажба на дребно</span>' : '',
+  ].filter(Boolean).join('');
+
+  const sourceDescription = cleanSourceDescription(vehicle.descriptionHtml);
+  const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Проверка на наличността във Viber</h3><p><strong>Изпратете във Viber на 0876 778 357 входящия номер на автомобила: ${vehicle.incomingNumber}.</strong></p><p>Ще потвърдим актуалната наличност, цената и следващите стъпки.</p><p><a href="/pages/zapitvane-za-avtomobil">Как да направя проверка</a></p></div>`;
+
+  return `<h2>${vehicle.title}</h2>`
+    + `<div style="margin:12px 0 18px;padding:16px;border:3px solid #d40000;color:#d40000;font-size:32px;line-height:1.2;font-weight:900;letter-spacing:1.5px;text-align:center">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
+    + '<div style="margin:12px 0 18px;padding:14px;border-left:5px solid #222;background:#f4f4f4;font-size:18px"><strong>Автомобилът се намира в чужбина и ще бъде доставен след плащане на проформа фактура.</strong></div>'
+    + (priorityBadges ? `<div style="margin:10px 0 18px">${priorityBadges}</div>` : '')
+    + `<ul>${facts.map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}</ul>`
+    + '<p><strong>Автомобилът е подбран по условията на Avtomol.com: до 25 000 км, без потвърдени данни за ПТП, в движение и без установена повреда в двигателя.</strong></p>'
+    + (sourceDescription ? `<div>${sourceDescription}</div>` : '')
+    + viberBox;
 }
 
 async function createShopifyProduct(vehicle) {
@@ -250,6 +299,27 @@ async function updateShopifyProductPrice(product, vehicle) {
   }`, { productId: product.id, variants: [{ id: product.variantId, price: vehicle.price.toFixed(2) }] });
   if (update.productVariantsBulkUpdate.userErrors.length) {
     throw new Error(`Shopify price rejected: ${JSON.stringify(update.productVariantsBulkUpdate.userErrors)}`);
+  }
+  return true;
+}
+
+async function updateShopifyProductContent(product, vehicle) {
+  const descriptionHtml = vehicleDescription(vehicle);
+  if (product.title === vehicle.title && product.descriptionHtml === descriptionHtml) return false;
+  if (DRY_RUN) return true;
+  const data = await shopifyGraphql(`mutation UpdateVehicleContent($product: ProductUpdateInput!) {
+    productUpdate(product: $product) { userErrors { field message } }
+  }`, {
+    product: {
+      id: product.id,
+      title: vehicle.title,
+      descriptionHtml,
+      status: 'ACTIVE',
+      tags: ['vehicle-sync', `incoming-${vehicle.incomingNumber}`],
+    },
+  });
+  if (data.productUpdate.userErrors.length) {
+    throw new Error(`Shopify content update rejected: ${JSON.stringify(data.productUpdate.userErrors)}`);
   }
   return true;
 }
@@ -431,16 +501,24 @@ async function main() {
   }
   await fs.writeFile(KNOWLEDGE_PATH, JSON.stringify(knowledge, null, 2) + '\n', 'utf8');
   report.learning = knowledge.totals;
-  const available = new Map(inventory.filter((vehicle) => vehicle.available).map((vehicle) => [vehicle.incomingNumber, vehicle]));
-  const products = await listManagedProducts([...available.values()]);
+  const eligibleVehicles = inventory
+    .filter((vehicle) => vehicle.available)
+    .sort((a, b) => vehiclePriority(b) - vehiclePriority(a));
+  const available = new Map(eligibleVehicles.map((vehicle) => [vehicle.incomingNumber, vehicle]));
+  const products = await listManagedProducts(eligibleVehicles);
   const existing = new Map(products.map((product) => [product.incomingNumber, product]));
   const sold = products.filter((product) => !available.has(product.incomingNumber));
-  const additions = [...available.values()].filter((vehicle) => !existing.has(vehicle.incomingNumber));
-  const updates = [...available.values()].filter((vehicle) => existing.has(vehicle.incomingNumber));
+  const additions = eligibleVehicles.filter((vehicle) => !existing.has(vehicle.incomingNumber));
+  const updates = eligibleVehicles.filter((vehicle) => existing.has(vehicle.incomingNumber));
   const facebookPosts = await facebookOrFallback('list posts', listFacebookPostsByIncomingNumber, new Map(), report.facebookFailures);
   if (ALLOW_DELETIONS && sold.length > MAX_DELETIONS) throw new Error(`Safety stop: ${sold.length} deletions exceed maximum ${MAX_DELETIONS}`);
   const pricingIncomplete = inventory.filter((vehicle) => !vehicle.pricingComplete).length;
-  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, pricingIncomplete, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
+  const rejected = inventory.filter((vehicle) => !vehicle.available).reduce((acc, vehicle) => {
+    const reason = eligibilityReason(vehicle);
+    acc[reason] = (acc[reason] || 0) + 1;
+    return acc;
+  }, {});
+  console.log(JSON.stringify({ dryRun: DRY_RUN, allowDeletions: ALLOW_DELETIONS, allowAdditions: ALLOW_ADDITIONS, inventory: inventory.length, eligible: eligibleVehicles.length, rejected, pricingIncomplete, existing: products.length, sold: sold.length, additions: additions.length, updates: updates.length }));
 
   if (ALLOW_DELETIONS) {
     for (const product of sold) {
@@ -454,11 +532,12 @@ async function main() {
   if (ALLOW_UPDATES) {
     for (const vehicle of updates) {
       const product = existing.get(vehicle.incomingNumber);
+      const contentChanged = await updateShopifyProductContent(product, vehicle);
       const priceChanged = await updateShopifyProductPrice(product, vehicle);
       const postId = product.facebookPostId || facebookPosts.get(vehicle.incomingNumber) || '';
       const facebookChanged = await facebookOrFallback(`update ${vehicle.incomingNumber}`, () => updateFacebookPost(postId, vehicle), false, report.facebookFailures);
       if (postId && !product.facebookPostId) await saveFacebookPostId(product.id, postId);
-      console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
+      console.log(`${DRY_RUN ? 'WOULD UPDATE' : 'UPDATE'} ${vehicle.incomingNumber} ShopifyContent=${contentChanged} ShopifyPrice=${priceChanged} Facebook=${facebookChanged}`);
     }
   } else if (updates.length) {
     console.log(`SKIP ${updates.length} updates because ALLOW_UPDATES is false`);
@@ -476,6 +555,12 @@ async function main() {
   Object.assign(report, {
     finishedAt: new Date().toISOString(),
     inventory: inventory.length,
+    eligible: eligibleVehicles.length,
+    rejected: inventory.filter((vehicle) => !vehicle.available).reduce((acc, vehicle) => {
+      const reason = eligibilityReason(vehicle);
+      acc[reason] = (acc[reason] || 0) + 1;
+      return acc;
+    }, {}),
     pricingIncomplete: inventory.filter((vehicle) => !vehicle.pricingComplete).length,
     existing: products.length,
     sold: sold.length,
@@ -491,5 +576,5 @@ if (require.main === module) main().catch(async (error) => {
   try { await fs.writeFile(REPORT_PATH, JSON.stringify({ startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(), fatal: error.message }, null, 2) + '\n', 'utf8'); } catch {}
   process.exitCode = 1;
 });
-module.exports = { normalizeVehicle, vehicleDescription, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
+module.exports = { normalizeVehicle, vehicleDescription, vehiclePriority, eligibilityReason, listManagedProducts, createShopifyProduct, updateShopifyProductPrice, updateShopifyProductContent, listFacebookPostsByIncomingNumber, updateFacebookPost, publishFacebookPost, saveFacebookPostId, facebookOrFallback };
 
