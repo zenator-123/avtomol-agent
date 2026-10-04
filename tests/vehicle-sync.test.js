@@ -81,3 +81,20 @@ test('description puts large red incoming number after title and explains foreig
   assert.match(html, /Възстановяемо ДДС/);
   assert.match(html, /Готов за продажба на дребно/);
 });
+
+
+test('description includes Viber availability inquiry', () => {
+  const html = vehicleDescription(normalizeVehicle({
+    id: 'VB12345',
+    title: 'Test Vehicle',
+    price: 20000,
+    pricingComplete: true,
+    mileage: '12000',
+    accidentFree: true,
+    drivable: true,
+    engineOk: true,
+  }));
+  assert.match(html, /Запитване за наличност във Viber/);
+  assert.match(html, /0876778357/);
+  assert.match(html, /viber:\/\/chat\?number=%2B359876778357/);
+});
