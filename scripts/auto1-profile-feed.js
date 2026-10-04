@@ -497,8 +497,8 @@ async function collectDomCards(page, collected) {
 function parseLabeledMoney(text, labels) {
   const source = String(text || '');
   for (const label of labels) {
-    const re1 = new RegExp(label + '[^\\d€]{0,60}(?:€|EUR)?\\s*([\\d .,\u2019\\']+)', 'i');
-    const re2 = new RegExp('(?:€|EUR)\\s*([\\d .,\u2019\\']+)[^\\n]{0,60}' + label, 'i');
+    const re1 = new RegExp(label + "[^\\d€]{0,60}(?:€|EUR)?\\s*([\\d .,\\u2019']+)", "i");
+    const re2 = new RegExp("(?:€|EUR)\\s*([\\d .,\\u2019']+)[^\\n]{0,60}" + label, "i");
     const m = source.match(re1) || source.match(re2);
     const n = parseNumber(m?.[1] || 0);
     if (n > 0) return n;
