@@ -547,7 +547,7 @@ async function enrichIncompletePricing(context, collected, attachResponseListene
     const url = String(vehicle.sourceUrl || '');
     if (!url || !/auto1\./i.test(url)) continue;
     try {
-      console.log(\`DETAIL \${index + 1}/\${targets.length} \${vehicle.incomingNumber}\`);
+      console.log(`DETAIL ${index + 1}/${targets.length} ${vehicle.incomingNumber}`);
       await detailPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await sleep(Math.max(900, settleMs));
       const body = await detailPage.locator('body').innerText({ timeout: 8000 }).catch(() => '');
@@ -593,7 +593,7 @@ async function enrichIncompletePricing(context, collected, attachResponseListene
 
       collected.set(stock, mergeVehicle(collected.get(stock), candidate));
     } catch (error) {
-      console.warn(\`::warning::DETAIL \${vehicle.incomingNumber} failed: \${error.message}\`);
+      console.warn(`::warning::DETAIL ${vehicle.incomingNumber} failed: ${error.message}`);
     }
   }
 
