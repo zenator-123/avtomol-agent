@@ -111,6 +111,117 @@ function parseNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (value === undefined || value === null || String(value).trim() === '') return undefined;
+  const text = String(value).trim().toLowerCase();
+  if (['true', 'yes', '1', 'ok', 'available', 'active'].includes(text)) return true;
+  if (['false', 'no', '0', 'not available', 'inactive'].includes(text)) return false;
+  return undefined;
+}
+
+function pickBoolean(flat, names) {
+  const value = pick(flat, names);
+  return parseBoolean(value);
+}
+
+function foldedText(strings) {
+  return strings
+    .map((value) => String(value || ''))
+    .join('\n')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase();
+}
+
+function detectVehicleAttributes(flat, strings) {
+  const text = foldedText(strings);
+
+  let vatDeductible = pickBoolean(flat, [
+    'vatDeductible', 'vat_deductible', 'deductibleVat', 'deductible_vat',
+    'vatRecoverable', 'vat_recoverable', 'recoverableVat', 'recoverable_vat',
+    'vatReclaimable', 'vat_reclaimable', 'inputTaxDeductible', 'taxDeductible'
+  ]);
+  if (/(vat\s*(?:not|non)[ -]?deductible|vat\s*not\s*(?:recoverable|reclaimable)|mwst\.?\s*nicht\s*ausweisbar|tva\s*non\s*recuperable)/i.test(text)) {
+    vatDeductible = false;
+  } else if (vatDeductible === undefined && /(vat\s*(?:deductible|recoverable|reclaimable)|mwst\.?\s*ausweisbar|mehrwertsteuer\s*ausweisbar|tva\s*recuperable|iva\s*(?:deducibile|detraibile)|vuzstanovy[a-z]*\s*dds|възстановяемо\s*ддс)/i.test(text)) {
+    vatDeductible = true;
+  }
+
+  let retailReady = pickBoolean(flat, [
+    'retailReady', 'retail_ready', 'readyForRetail', 'ready_for_retail',
+    'isRetailReady', 'is_retail_ready'
+  ]);
+  const retailState = String(pick(flat, ['retailState', 'retail_state', 'readiness', 'condition']) || '').toLowerCase();
+  if (retailReady === undefined && /retail[\s_-]*ready|ready[\s_-]*for[\s_-]*retail|готов.*продажба.*дребно/i.test(retailState + '\n' + text)) {
+    retailReady = true;
+  }
+
+  const accidentFreeDirect = pickBoolean(flat, [
+    'accidentFree', 'accident_free', 'isAccidentFree', 'is_accident_free',
+    'noAccidentDamage', 'no_accident_damage'
+  ]);
+  const accidentVehicle = pickBoolean(flat, [
+    'accidentVehicle', 'accident_vehicle', 'isAccidentVehicle', 'is_accident_vehicle',
+    'hasAccidentDamage', 'has_accident_damage', 'structuralDamage', 'structural_damage',
+    'collisionDamage', 'collision_damage'
+  ]);
+  let accidentFree = accidentFreeDirect;
+  if (accidentFree === undefined && accidentVehicle !== undefined) accidentFree = !accidentVehicle;
+  if (/(accident\s*vehicle|unfallfahrzeug|unfallschaden|crash\s*damage|collision\s*damage|structural\s*damage|major\s*accident|severe\s*accident|катастрофирал|ударен\s*автомобил|структурн.*повред)/i.test(text)) {
+    accidentFree = false;
+  } else if (accidentFree === undefined && /(accident[ -]?free|unfallfrei|no\s*accident\s*damage|без\s*птп|без\s*катастроф)/i.test(text)) {
+    accidentFree = true;
+  }
+
+  const roadworthy = pickBoolean(flat, [
+    'roadworthy', 'isRoadworthy', 'is_roadworthy', 'drivable', 'isDrivable', 'is_drivable',
+    'driveable', 'startsAndDrives', 'starts_and_drives', 'operational', 'runnable'
+  ]);
+  const unroadworthy = pickBoolean(flat, ['isUnroadworthy', 'unroadworthy', 'notRoadworthy', 'not_roadworthy']);
+  let drivable = roadworthy;
+  if (drivable === undefined && unroadworthy !== undefined) drivable = !unroadworthy;
+  if (/(not\s*roadworthy|unroadworthy|not\s*drivable|non[- ]?runner|does\s*not\s*start|engine\s*does\s*not\s*run|nicht\s*fahrbereit|nicht\s*fahrfaehig|не\s*е\s*в\s*движение|не\s*пали)/i.test(text)) {
+    drivable = false;
+  } else if (drivable === undefined && /(roadworthy|drivable|driveable|starts\s*and\s*drives|fahrbereit|fahrfaehig|fahrfahig|in\s*running\s*condition|в\s*движение|пали\s*и\s*върви)/i.test(text)) {
+    drivable = true;
+  }
+
+  const engineDamage = pickBoolean(flat, [
+    'engineDamage', 'engine_damage', 'hasEngineDamage', 'has_engine_damage',
+    'engineDefect', 'engine_defect', 'motorDamage', 'motor_damage',
+    'engineFault', 'engine_fault'
+  ]);
+  const engineRuns = pickBoolean(flat, [
+    'engineRuns', 'engine_runs', 'engineStarts', 'engine_starts',
+    'motorRuns', 'motor_runs', 'motorStarts', 'motor_starts'
+  ]);
+  let engineOk;
+  if (engineDamage !== undefined) engineOk = !engineDamage;
+  if (engineRuns === true) engineOk = true;
+  if (/(engine\s*(?:damage|defect|failure|fault)|motor\s*damage|motorschaden|engine\s*not\s*running|engine\s*does\s*not\s*start|двигател.*повред|повред.*двигател|двигател.*не\s*пали)/i.test(text)) {
+    engineOk = false;
+  } else if (engineOk === undefined && /(no\s*engine\s*damage|engine\s*runs|engine\s*starts|motor\s*laeuft|motor\s*läuft|двигател.*работи|без\s*повред.*двигател)/i.test(text)) {
+    engineOk = true;
+  }
+
+  return {
+    vatDeductible,
+    retailReady,
+    accidentFree,
+    drivable,
+    engineOk,
+    isUnroadworthy: unroadworthy === true,
+  };
+}
+
+function parseMileageText(value) {
+  const text = String(value || '');
+  const match = text.match(/(?:mileage|odometer|пробег|kilometerstand|km-stand)[^\d]{0,30}([\d .,'’]+)\s*km/i)
+    || text.match(/([\d .,'’]+)\s*km\b/i);
+  return String(match?.[1] || '').replace(/[^\d]/g, '');
+}
+
 
 const DOCUMENT_FEE_BY_COUNTRY_EUR = Object.freeze({
   AT: 478,
@@ -333,7 +444,8 @@ function normalizeVehicle(raw, sourceUrl = '') {
     ? directFlag
     : true;
 
-  const unroadworthy = Boolean(pick(flat, ['isUnroadworthy', 'unroadworthy', 'notRoadworthy']));
+  const attributes = detectVehicleAttributes(flat, strings);
+  const unroadworthy = attributes.isUnroadworthy === true;
   const images = collectImages(strings);
   const detailsUrl = strings.find(v => /^https:\/\//i.test(v) && /auto1\./i.test(v) && /vehicle|car|offer|auction/i.test(v)) || sourceUrl;
 
@@ -367,7 +479,11 @@ function normalizeVehicle(raw, sourceUrl = '') {
     purchaseType: purchaseType || 'instant purchase',
     directPurchase,
     isUnroadworthy: unroadworthy,
-    retailReady: !unroadworthy,
+    vatDeductible: attributes.vatDeductible,
+    retailReady: attributes.retailReady,
+    accidentFree: attributes.accidentFree,
+    drivable: attributes.drivable,
+    engineOk: attributes.engineOk,
     sourceUrl: detailsUrl || ''
   };
 }
@@ -486,7 +602,11 @@ async function collectDomCards(page, collected) {
       purchaseType: 'instant purchase',
       directPurchase: true,
       isUnroadworthy: false,
-      retailReady: true,
+      vatDeductible: undefined,
+      retailReady: undefined,
+      accidentFree: undefined,
+      drivable: undefined,
+      engineOk: undefined,
       sourceUrl: row.href
     };
     collected.set(candidate.incomingNumber, mergeVehicle(collected.get(candidate.incomingNumber), candidate));
@@ -535,7 +655,15 @@ function parseCountryFromPageText(text) {
 async function enrichIncompletePricing(context, collected, attachResponseListener) {
   const maxDetails = Math.max(0, Number(process.env.AUTO1_DETAIL_LIMIT || 60));
   const targets = [...collected.values()]
-    .filter(v => !v.pricingComplete && /^https:\/\//i.test(String(v.sourceUrl || '')))
+    .filter((v) => (
+      !v.pricingComplete
+      || !String(v.mileage || '').replace(/[^\d]/g, '')
+      || v.accidentFree !== true
+      || v.drivable !== true
+      || v.engineOk !== true
+      || v.vatDeductible === undefined
+      || v.retailReady === undefined
+    ) && /^https:\/\//i.test(String(v.sourceUrl || '')))
     .slice(0, maxDetails);
   if (!targets.length) return;
 
@@ -570,6 +698,9 @@ async function enrichIncompletePricing(context, collected, attachResponseListene
       ]);
       const countryCode = vehicle.purchaseCountry || parseCountryFromPageText(body);
       const pricing = calculatePublicPrice(auto1Price, transportEur, countryCode);
+      const detailFlat = flatten({ pageText: body });
+      const detailAttributes = detectVehicleAttributes(detailFlat, [body]);
+      const detailMileage = String(vehicle.mileage || '').replace(/[^\d]/g, '') || parseMileageText(body);
 
       const candidate = {
         ...vehicle,
@@ -582,6 +713,13 @@ async function enrichIncompletePricing(context, collected, attachResponseListene
         profitEur: pricing.profitEur,
         price: pricing.price,
         pricingComplete: pricing.pricingComplete,
+        mileage: detailMileage,
+        vatDeductible: detailAttributes.vatDeductible ?? vehicle.vatDeductible,
+        retailReady: detailAttributes.retailReady ?? vehicle.retailReady,
+        accidentFree: detailAttributes.accidentFree ?? vehicle.accidentFree,
+        drivable: detailAttributes.drivable ?? vehicle.drivable,
+        engineOk: detailAttributes.engineOk ?? vehicle.engineOk,
+        isUnroadworthy: detailAttributes.isUnroadworthy || vehicle.isUnroadworthy === true,
         sourceUrl: url,
       };
 
