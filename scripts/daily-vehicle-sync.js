@@ -249,7 +249,7 @@ function vehicleDescription(vehicle) {
   ].filter(Boolean).join('');
 
   const sourceDescription = cleanSourceDescription(vehicle.descriptionHtml);
-  const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Проверка на наличността във Viber</h3><p><strong>Изпратете във Viber на 0876 778 357 входящия номер на автомобила: ${vehicle.incomingNumber}.</strong></p><p>Ще потвърдим актуалната наличност, цената и следващите стъпки.</p><p><a href="/pages/zapitvane-za-avtomobil">Как да направя проверка</a></p></div>`;
+  const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Запитване за наличност във Viber</h3><p style="font-size:20px"><strong>Viber: 0876778357</strong></p><p>Изпратете входящия номер <strong>${vehicle.incomingNumber}</strong>, за да проверим актуалната наличност на автомобила.</p><p><a href="viber://chat?number=%2B359876778357" style="display:inline-block;padding:12px 18px;background:#7360f2;color:#fff;text-decoration:none;border-radius:7px;font-weight:700">ПИШИ ВЪВ VIBER</a></p><p>Ще потвърдим наличността, крайната цена и следващите стъпки по поръчката.</p></div>`;
 
   return `<h2>${vehicle.title}</h2>`
     + `<div style="margin:12px 0 18px;padding:16px;border:3px solid #d40000;color:#d40000;font-size:32px;line-height:1.2;font-weight:900;letter-spacing:1.5px;text-align:center">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
@@ -393,7 +393,7 @@ function facebookMessage(vehicle) {
     description,
     'Доставката до България е включена в цената.',
     'При поръчка се издава проформа фактура. След плащането автомобилът се доставя в указания срок.',
-    'Телефон: 0876 778 357',
+    'Запитване за наличност във Viber: 0876778357',
   ].filter(Boolean).join('\n');
 }
 
