@@ -13,6 +13,8 @@ const FACEBOOK_STRICT = String(process.env.FACEBOOK_STRICT || 'false').toLowerCa
 const FACEBOOK_PHOTOS_PER_POST = Math.max(1, Math.min(10, Number(process.env.FACEBOOK_PHOTOS_PER_POST || 10)));
 const REPORT_PATH = process.env.VEHICLE_SYNC_REPORT_PATH || 'daily-vehicle-sync-report.json';
 const KNOWLEDGE_PATH = process.env.VEHICLE_KNOWLEDGE_PATH || 'vehicle-knowledge.json';
+const MISSING_STATE_PATH = process.env.VEHICLE_MISSING_STATE_PATH || 'vehicle-missing-counts.json';
+const MISSING_RUNS_BEFORE_SOLD = Math.max(2, Number(process.env.MISSING_RUNS_BEFORE_SOLD || 2));
 
 function pick(object, names) {
   for (const name of names) {
@@ -89,6 +91,15 @@ function eligibilityReason(vehicle) {
   if (!vehicle.drivable || vehicle.isUnroadworthy) return 'not-confirmed-drivable';
   if (!vehicle.engineOk) return 'engine-condition-not-confirmed-good';
   return vehicle.available ? 'eligible' : 'unavailable';
+}
+
+async function readMissingCounts() {
+  try {
+    const raw = JSON.parse(await fs.readFile(MISSING_STATE_PATH, 'utf8'));
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
 }
 
 async function loadInventory() {
@@ -539,9 +550,20 @@ async function main() {
   );
   const products = await listManagedProducts(eligibleVehicles);
   const existing = new Map(products.map((product) => [product.incomingNumber, product]));
+
+  const missingCounts = await readMissingCounts();
+  for (const product of products) {
+    const stock = product.incomingNumber;
+    if (allInventoryByStock.has(stock)) delete missingCounts[stock];
+    else missingCounts[stock] = Number(missingCounts[stock] || 0) + 1;
+  }
+  await fs.writeFile(MISSING_STATE_PATH, JSON.stringify(missingCounts, null, 2) + '\n', 'utf8');
+
   const sold = products.filter((product) => {
-    if (explicitlyUnavailable.has(product.incomingNumber)) return true;
-    if (knowledge.completeAuto1Catalog && !allInventoryByStock.has(product.incomingNumber)) return true;
+    const stock = product.incomingNumber;
+    if (explicitlyUnavailable.has(stock)) return true;
+    if (knowledge.completeAuto1Catalog && !allInventoryByStock.has(stock)) return true;
+    if (!allInventoryByStock.has(stock) && Number(missingCounts[stock] || 0) >= MISSING_RUNS_BEFORE_SOLD) return true;
     return false;
   });
   const additions = eligibleVehicles.filter((vehicle) => !existing.has(vehicle.incomingNumber));
