@@ -163,10 +163,29 @@ async function getShopifyAccessToken(shop) {
   return cachedShopifyToken;
 }
 
+function extractProductIncomingNumber(product) {
+  const variant = product?.variants?.nodes?.[0] || {};
+  const pieces = [
+    product?.metafield?.value,
+    variant.sku,
+    ...(Array.isArray(product?.tags) ? product.tags : []),
+    product?.handle,
+    product?.title,
+    product?.descriptionHtml,
+  ].filter(Boolean).map(String);
+  for (const value of pieces) {
+    const tagged = value.match(/incoming[-_\\s:]?([A-Z]{2}\\d{5})/i);
+    if (tagged) return tagged[1].toUpperCase();
+    const plain = value.match(/(?:^|[^A-Z0-9])([A-Z]{2}\\d{5})(?:[^A-Z0-9]|$)/i);
+    if (plain) return plain[1].toUpperCase();
+  }
+  return '';
+}
+
 function mapManagedProduct(product) {
   return {
     ...product,
-    incomingNumber: product.metafield?.value || '',
+    incomingNumber: extractProductIncomingNumber(product),
     facebookPostId: product.facebookPost?.value || '',
     variantId: product.variants?.nodes?.[0]?.id || '',
     price: Number(product.variants?.nodes?.[0]?.price || 0),
@@ -180,7 +199,7 @@ async function listManagedProducts(vehicles = []) {
   do {
     const data = await shopifyGraphql(`query ManagedVehicles($cursor: String, $query: String!) {
       products(first: 100, after: $cursor, query: $query) {
-        nodes { id title handle descriptionHtml variants(first: 1) { nodes { id price } }
+        nodes { id title handle descriptionHtml tags variants(first: 1) { nodes { id price sku } }
           metafield(namespace: "custom", key: "incoming_number") { value }
           facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } }
         pageInfo { hasNextPage endCursor }
@@ -193,7 +212,7 @@ async function listManagedProducts(vehicles = []) {
   for (const vehicle of vehicles) {
     if (!vehicle.handle || knownHandles.has(vehicle.handle)) continue;
     const data = await shopifyGraphql(`query VehicleByHandle($query: String!) {
-      products(first: 1, query: $query) { nodes { id title handle descriptionHtml variants(first: 1) { nodes { id price } }
+      products(first: 1, query: $query) { nodes { id title handle descriptionHtml tags variants(first: 1) { nodes { id price sku } }
         metafield(namespace: "custom", key: "incoming_number") { value }
         facebookPost: metafield(namespace: "custom", key: "facebook_post_id") { value } } }
     }`, { query: `handle:${vehicle.handle}` });
@@ -264,7 +283,7 @@ function vehicleDescription(vehicle) {
   const viberBox = `<div style="border:3px solid #7360f2;background:#f7f5ff;padding:18px;margin:22px 0;border-radius:10px"><h3 style="margin-top:0">Запитване за наличност във Viber</h3><p style="font-size:20px"><strong>Viber: 0876778357</strong></p><p>Изпратете входящия номер <strong>${vehicle.incomingNumber}</strong>, за да проверим актуалната наличност на автомобила.</p><p><a href="viber://chat?number=%2B359876778357" style="display:inline-block;padding:12px 18px;background:#7360f2;color:#fff;text-decoration:none;border-radius:7px;font-weight:700">ПИШИ ВЪВ VIBER</a></p><p>Ще потвърдим наличността, крайната цена и следващите стъпки по поръчката.</p></div>`;
 
   return `<h2>${vehicle.title}</h2>`
-    + `<div style="margin:12px 0 18px;padding:16px;border:3px solid #d40000;color:#d40000;font-size:32px;line-height:1.2;font-weight:900;letter-spacing:1.5px;text-align:center">ВХОДЯЩ НОМЕР: ${vehicle.incomingNumber}</div>`
+    + `<div data-avtomol-incoming="1" style="margin:12px 0 22px;padding:18px 16px;border:4px solid #d40000;background:#fff4f4;border-radius:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:#222;letter-spacing:1px">ВХОДЯЩ НОМЕР</div><div style="font-size:44px;line-height:1.15;font-weight:900;color:#d40000;letter-spacing:3px">${vehicle.incomingNumber}</div></div>`
     + '<div style="margin:12px 0 18px;padding:14px;border-left:5px solid #222;background:#f4f4f4;font-size:18px"><strong>Автомобилът се намира в чужбина и ще бъде доставен след плащане на проформа фактура.</strong></div>'
     + (priorityBadges ? `<div style="margin:10px 0 18px">${priorityBadges}</div>` : '')
     + `<ul>${facts.map(([key, value]) => `<li><strong>${key}:</strong> ${value}</li>`).join('')}</ul>`
