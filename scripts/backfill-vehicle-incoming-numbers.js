@@ -46,16 +46,50 @@ async function token(shop) {
   return cachedToken;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function gql(query, variables = {}) {
   const shop = env('SHOPIFY_SHOP_DOMAIN').replace(/^https?:\/\//, '').replace(/\/$/, '');
-  const response = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await token(shop) },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await response.json();
-  if (!response.ok || json.errors) throw new Error(`Shopify request failed: ${response.status} ${JSON.stringify(json.errors || json)}`);
-  return json.data;
+  const url = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
+  let lastError;
+
+  for (let attempt = 1; attempt <= 7; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': await token(shop) },
+        body: JSON.stringify({ query, variables }),
+      });
+
+      const text = await response.text();
+      let json;
+      try { json = JSON.parse(text); }
+      catch { throw new Error(`Shopify returned non-JSON HTTP ${response.status}`); }
+
+      if (response.status === 429 || response.status >= 500) {
+        throw new Error(`Retryable Shopify HTTP ${response.status}`);
+      }
+      if (!response.ok || json.errors) {
+        throw new Error(`Shopify request failed: ${response.status} ${JSON.stringify(json.errors || json)}`);
+      }
+
+      const throttle = json.extensions?.cost?.throttleStatus;
+      if (throttle && Number(throttle.currentlyAvailable || 0) < 100) {
+        await sleep(1200);
+      }
+      return json.data;
+    } catch (error) {
+      lastError = error;
+      const waitMs = Math.min(30000, 1500 * attempt * attempt);
+      console.warn(`RETRY ${attempt}/7 after error: ${error.message}. Waiting ${Math.round(waitMs/1000)}s...`);
+      await sleep(waitMs);
+      cachedToken = '';
+    }
+  }
+
+  throw lastError || new Error('Shopify request failed after retries');
 }
 
 function extractIncomingNumber(product) {
@@ -109,28 +143,30 @@ async function updateLegacy(product, stock) {
 
   const updated = await gql(`mutation BackfillVehicle($product: ProductUpdateInput!) {
     productUpdate(product: $product) { userErrors { field message } }
-  }`, { product: { id: product.id, descriptionHtml, tags } });
+  }`, {
+    product: {
+      id: product.id,
+      descriptionHtml,
+      tags,
+      metafields: [{
+        namespace: 'custom',
+        key: 'incoming_number',
+        type: 'single_line_text_field',
+        value: stock,
+      }],
+    },
+  });
   const errors = updated.productUpdate?.userErrors || [];
   if (errors.length) throw new Error(JSON.stringify(errors));
 
-  const mf = await gql(`mutation SaveIncoming($metafields: [MetafieldsSetInput!]!) {
-    metafieldsSet(metafields: $metafields) { userErrors { field message } }
-  }`, {
-    metafields: [{
-      ownerId: product.id,
-      namespace: 'custom',
-      key: 'incoming_number',
-      type: 'single_line_text_field',
-      value: stock,
-    }],
-  });
-  const mfErrors = mf.metafieldsSet?.userErrors || [];
-  if (mfErrors.length) throw new Error(JSON.stringify(mfErrors));
+  // Small pause keeps long backfills stable and avoids API bursts.
+  await sleep(180);
 }
 
 async function main() {
   let repaired = 0;
   let skippedNoStock = 0;
+  let failed = 0;
 
   while (repaired < MAX_PER_RUN) {
     const page = await nextLegacyPage();
@@ -153,16 +189,23 @@ async function main() {
         continue;
       }
 
-      await updateLegacy(product, stock);
-      repaired += 1;
-      changedOnPage += 1;
-      console.log(`BACKFILL ${stock} ${product.title}`);
+      try {
+        await updateLegacy(product, stock);
+        repaired += 1;
+        changedOnPage += 1;
+        console.log(`BACKFILL ${stock} ${product.title}   [TOTAL ${repaired}]`);
+      } catch (error) {
+        failed += 1;
+        console.warn(`SKIP ERROR ${stock} ${product.title}: ${error.message}`);
+        await sleep(3000);
+      }
     }
 
     if (!changedOnPage && page.every((p) => !extractIncomingNumber(p))) break;
   }
 
-  console.log(JSON.stringify({ repaired, skippedNoStock, maxPerRun: MAX_PER_RUN }));
+  console.log(JSON.stringify({ repaired, skippedNoStock, failed, maxPerRun: MAX_PER_RUN }));
+  if (failed > 0) console.warn(`Completed with ${failed} temporary product errors; run again to retry any remaining cars.`);
 }
 
 main().catch((error) => {
