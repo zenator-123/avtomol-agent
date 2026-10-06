@@ -79,7 +79,7 @@ function extractIncomingNumber(product) {
 }
 
 function incomingBox(stock) {
-  return `<div data-avtomol-incoming="1" style="margin:0 0 22px;padding:18px 16px;border:4px solid #d40000;background:#fff4f4;border-radius:10px;text-align:center"><div style="font-size:18px;font-weight:800;color:#222;letter-spacing:1px">ВХОДЯЩ НОМЕР</div><div style="font-size:44px;line-height:1.15;font-weight:900;color:#d40000;letter-spacing:3px">${stock}</div></div>`;
+  return `<div data-avtomol-incoming="1" style="margin:0 0 22px;padding:18px 16px;border:4px solid #d40000;background:#fff4f4;border-radius:10px;text-align:center"><div style="font-size:30px;line-height:1.1;font-weight:900;color:#d40000;letter-spacing:2px">ВХОДЯЩ НОМЕР</div><div style="font-size:52px;line-height:1.1;font-weight:900;color:#d40000;letter-spacing:4px">${stock}</div></div>`;
 }
 
 function withIncomingBox(html, stock) {
