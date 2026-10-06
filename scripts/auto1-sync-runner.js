@@ -64,6 +64,11 @@ const mappedEnv = {
   ALLOW_UPDATES: 'true'
 };
 
+run(path.join(__dirname, 'backfill-vehicle-incoming-numbers.js'), {
+  ...mappedEnv,
+  LEGACY_INCOMING_BACKFILL_LIMIT: process.env.LEGACY_INCOMING_BACKFILL_LIMIT || '500',
+});
+
 run(path.join(__dirname, 'auto1-profile-feed.js'), mappedEnv);
 
 const payload = JSON.parse(fs.readFileSync(inventoryPath, 'utf8'));
